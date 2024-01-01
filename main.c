@@ -34,30 +34,26 @@ int main()
         conns[i].fd = -1;
     }
 
-	// socket create and verification 
-	int sockfd = socket(AF_INET, SOCK_STREAM, 0); 
-	if (sockfd == -1) { 
-		perror("socket");
-		exit(0);
-	} 
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0); 
+    if (sockfd == -1) { 
+        perror("socket");
+        exit(0);
+    } 
 
-	// assign IP, PORT 
     struct sockaddr_in servaddr = {0};
-	servaddr.sin_family = AF_INET; 
-	servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
-	servaddr.sin_port = htons(PORT); 
+    servaddr.sin_family = AF_INET; 
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
+    servaddr.sin_port = htons(PORT); 
 
-	// Binding newly created socket to given IP and verification 
-	if ((bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr))) != 0) { 
-		perror("bind");
-		exit(1);
-	} 
+    if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) != 0) { 
+        perror("bind");
+        exit(1);
+    } 
 
-	// Now server is ready to listen and verification 
-	if ((listen(sockfd, 5)) != 0) { 
-		perror("listen");
-		exit(1);
-	} 
+    if (listen(sockfd, 5) != 0) { 
+        perror("listen");
+        exit(1);
+    } 
 
     set_nonblocking(sockfd);
 

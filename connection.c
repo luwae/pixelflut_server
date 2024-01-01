@@ -63,3 +63,11 @@ void connection_close(struct connection *conn) {
     conn->fd = -1;
 }
 
+void connection_print(const struct connection *conn, int id) {
+    in_addr_t a = conn->addr.sin_addr.s_addr;
+    printf("Connection { ip: %d.%d.%d.%d", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, (a >> 24) & 0xff);
+    if (id != -1)
+        printf(", id: %d }\n", id);
+    else
+        printf(" }\n");
+}

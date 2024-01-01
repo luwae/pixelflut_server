@@ -22,4 +22,6 @@ int connection_get(struct connection *conn, struct pixel *px);
 
 void connection_close(struct connection *conn);
 
+void connection_print(const struct connection *conn, int id);
+
 #endif

@@ -83,13 +83,13 @@ int main()
             perror("accept");
             exit(1);
         } else if (connfd != -1) {
-            printf("accept connection ");
-            in_addr_t a = connaddr.sin_addr.s_addr;
-            printf("%d.%d.%d.%d\n", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, (a >> 24) & 0xff);
             set_nonblocking(connfd);
             c->fd = connfd;
             c->addr = connaddr;
             c->read_pos = c->write_pos = 0;
+
+            printf("accepted ");
+            connection_print(c, free);
         }
 
         // move through all connections
@@ -101,14 +101,13 @@ int main()
             if (status == GET_SUCCESS) {
                 // TODO draw px
                 printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
-                in_addr_t a = conns[i].addr.sin_addr.s_addr;
-                printf("%d.%d.%d.%d\n", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, (a >> 24) & 0xff);
+                connection_print(&conns[i], i);
             } else if (status == GET_WOULDBLOCK) {
                 // do nothing
             } else { // if status == GET_CONNECTION_END
-                printf("close connection ");
-                in_addr_t a = conns[i].addr.sin_addr.s_addr;
-                printf("%d.%d.%d.%d\n", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, (a >> 24) & 0xff);
+                printf("close ");
+                connection_print(&conns[i], i);
+
                 connection_close(&conns[i]);
             }
         }

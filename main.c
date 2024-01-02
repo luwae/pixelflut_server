@@ -30,6 +30,7 @@ void set_nonblocking(int fd) {
     }
 }
 
+/*
 void px_on_key(int key, int scancode, int mods) {
 
 	printf("Key pressed: key:%d scancode:%d mods:%d\n", key, scancode, mods);
@@ -57,14 +58,16 @@ void px_on_window_close() {
 	printf("Window closed\n");
 	should_stop = 1;
 }
+*/
 
 int main()
 {
+    canvas_start();
     // --- WINDOW SETUP ---
-    canvas_setcb_key(&px_on_key);
-    canvas_setcb_resize(&px_on_resize);
+    // canvas_setcb_key(&px_on_key);
+    // canvas_setcb_resize(&px_on_resize);
 
-    canvas_start(1024, &px_on_window_close);
+    // canvas_start(1024, &px_on_window_close);
     // --- END WINDOW SETUP ---
 
     for (int i = 0; i < MAX_CONNS; i++) {
@@ -133,7 +136,7 @@ int main()
             int status = connection_get(&conns[i], &px);
             if (status == GET_SUCCESS) {
                 printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
-                canvas_set_px(px.x, px.y, (px.r << 24) | (px.g << 16) | (px.b << 8) | 0xff);
+                canvas_set_px(&px);
                 connection_print(&conns[i], i);
             } else if (status == GET_WOULDBLOCK) {
                 // do nothing

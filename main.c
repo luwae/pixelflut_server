@@ -10,11 +10,13 @@
 
 #include "common.h"
 #include "connection.h"
+#include "canvas.h"
 
 #define PORT 1337
 
 #define MAX_CONNS 10
 struct connection conns[MAX_CONNS];
+volatile int should_stop = 0;
 
 void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -28,8 +30,43 @@ void set_nonblocking(int fd) {
     }
 }
 
-int main() 
-{ 
+void px_on_key(int key, int scancode, int mods) {
+
+	printf("Key pressed: key:%d scancode:%d mods:%d\n", key, scancode, mods);
+
+	if (key == 300) { // F11
+		int display = canvas_get_display();
+		if (display < 0)
+			canvas_fullscreen(0);
+		else
+			canvas_fullscreen(-1);
+	} else if (key == 301) { // F12
+		canvas_fullscreen(canvas_get_display() + 1);
+	} else if (key == 67) { // c
+		canvas_fill(0x00000088);
+	} else if (key == 81 || key == 256) { // q or ESC
+		canvas_close();
+	}
+}
+
+void px_on_resize() {
+	// canvas_get_size(&px_width, &px_height);
+}
+
+void px_on_window_close() {
+	printf("Window closed\n");
+	should_stop = 1;
+}
+
+int main()
+{
+    // --- WINDOW SETUP ---
+    canvas_setcb_key(&px_on_key);
+    canvas_setcb_resize(&px_on_resize);
+
+    canvas_start(1024, &px_on_window_close);
+    // --- END WINDOW SETUP ---
+
     for (int i = 0; i < MAX_CONNS; i++) {
         conns[i].fd = -1;
     }
@@ -57,7 +94,7 @@ int main()
 
     set_nonblocking(sockfd);
 
-    while (1) {
+    while (!should_stop) {
         int free = -1;
         for (int i = 0; i < MAX_CONNS; i++) {
             if (conns[i].fd == -1) {
@@ -95,8 +132,8 @@ int main()
                 continue;
             int status = connection_get(&conns[i], &px);
             if (status == GET_SUCCESS) {
-                // TODO draw px
                 printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
+                canvas_set_px(px.x, px.y, (px.r << 24) | (px.g << 16) | (px.b << 8) | 0xff);
                 connection_print(&conns[i], i);
             } else if (status == GET_WOULDBLOCK) {
                 // do nothing
@@ -108,4 +145,12 @@ int main()
             }
         }
     }
+    
+    printf("close network\n");
+    for (int i = 0; i < MAX_CONNS; i++) {
+        if (conns[i].fd != -1) {
+            close(conns[i].fd);
+        }
+    }
+    close(sockfd);
 }

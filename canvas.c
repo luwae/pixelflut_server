@@ -79,6 +79,8 @@ void canvas_start(void) {
 }
 
 void canvas_set_px(const struct pixel *px) {
+    if (px->x >= 1024 || px->y >= 1024)
+        return;
     unsigned int index = px->x + 1024 * px->y;
     pixels[index] = (px->r << 24) | (px->g << 16) | (px->b << 8) | 0xff;
 }

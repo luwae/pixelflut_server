@@ -1,27 +1,12 @@
-#ifndef CANVAS_H_
-#define CANVAS_H_
+#ifndef PFS_CANVAS_H
+#define PFS_CANVAS_H
 
-#include <stdint.h>
+#include "common.h"
 
-// Open the canvas window and start the gui loop (in a separate thread)
-void canvas_start(unsigned int texSize, void (*on_close)());
+void canvas_start(void);
+void canvas_stop(void);
+void canvas_draw(void);
+void canvas_set_px(const struct pixel *px);
+int canvas_should_quit(void);
 
-void canvas_setcb_key(void (*on_key)(int key, int scancode, int mods));
-void canvas_setcb_resize(void (*on_resize)());
-
-// Close the canvas window and free any resources and contexts
-void canvas_close();
-
-void canvas_fullscreen(int display);
-int canvas_get_display();
-
-void canvas_fill(uint32_t rgba);
-void canvas_set_px(unsigned int x, unsigned int y, uint32_t rgba);
-void canvas_get_px(unsigned int x, unsigned int y, uint32_t *rgba);
-
-// get the current visible canvas size in pixel.
-// The actual window might be bigger if scaling is enabled.
-void canvas_get_size(unsigned int *width, unsigned int *height);
-
-
-#endif /* CANVAS_H_ */
+#endif

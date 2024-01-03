@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "common.h"
 #include "connection.h"
@@ -16,7 +17,7 @@
 
 #define MAX_CONNS 10
 struct connection conns[MAX_CONNS];
-volatile int should_stop = 0;
+volatile int should_quit = 0;
 
 void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -30,45 +31,10 @@ void set_nonblocking(int fd) {
     }
 }
 
-/*
-void px_on_key(int key, int scancode, int mods) {
+extern pthread_t canvas_thread;
 
-	printf("Key pressed: key:%d scancode:%d mods:%d\n", key, scancode, mods);
-
-	if (key == 300) { // F11
-		int display = canvas_get_display();
-		if (display < 0)
-			canvas_fullscreen(0);
-		else
-			canvas_fullscreen(-1);
-	} else if (key == 301) { // F12
-		canvas_fullscreen(canvas_get_display() + 1);
-	} else if (key == 67) { // c
-		canvas_fill(0x00000088);
-	} else if (key == 81 || key == 256) { // q or ESC
-		canvas_close();
-	}
-}
-
-void px_on_resize() {
-	// canvas_get_size(&px_width, &px_height);
-}
-
-void px_on_window_close() {
-	printf("Window closed\n");
-	should_stop = 1;
-}
-*/
-
-int main()
-{
+int main() {
     canvas_start();
-    // --- WINDOW SETUP ---
-    // canvas_setcb_key(&px_on_key);
-    // canvas_setcb_resize(&px_on_resize);
-
-    // canvas_start(1024, &px_on_window_close);
-    // --- END WINDOW SETUP ---
 
     for (int i = 0; i < MAX_CONNS; i++) {
         conns[i].fd = -1;
@@ -78,7 +44,7 @@ int main()
     if (sockfd == -1) { 
         perror("socket");
         exit(0);
-    } 
+    }
 
     struct sockaddr_in servaddr = {0};
     servaddr.sin_family = AF_INET; 
@@ -97,7 +63,8 @@ int main()
 
     set_nonblocking(sockfd);
 
-    while (!should_stop) {
+    printf("staring main network loop\n");
+    while (!should_quit) {
         int free = -1;
         for (int i = 0; i < MAX_CONNS; i++) {
             if (conns[i].fd == -1) {
@@ -149,11 +116,13 @@ int main()
         }
     }
     
-    printf("close network\n");
+    printf("closing network\n");
     for (int i = 0; i < MAX_CONNS; i++) {
         if (conns[i].fd != -1) {
             close(conns[i].fd);
         }
     }
     close(sockfd);
+    
+    pthread_join(canvas_thread, NULL);
 }

@@ -4,8 +4,7 @@
 #include "common.h"
 
 void canvas_start();
-
-void canvas_close();
+// closing canvas: set should_quit
 
 void canvas_set_px(const struct pixel *px);
 

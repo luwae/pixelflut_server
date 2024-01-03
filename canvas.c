@@ -17,43 +17,35 @@ pthread_t canvas_thread;
 #define CLEANUP_AND_EXIT_IF(error_cond, prefix) do { \
     if (error_cond) {                                \
         printf("%s: %s\n", prefix, SDL_GetError());  \
-        canvas_close();                              \
+        canvas_stop();                               \
         exit(1);                                     \
     }                                                \
 } while (0)
 
-void canvas_close(void) {
-    if (screen_texture)
+void canvas_stop(void) {
+    if (screen_texture) {
         SDL_DestroyTexture(screen_texture);
-    if (renderer)
+        screen_texture = NULL;
+    }
+    if (renderer) {
         SDL_DestroyRenderer(renderer);
-    if (window)
+        renderer = NULL;
+    }
+    if (window) {
         SDL_DestroyWindow(window);
+        window = NULL;
+    }
     SDL_Quit();
 }
 
-void *canvas_thread_main(void *arg) {
-    (void) arg; // suppress compiler warning
-    printf("started canvas thread\n");
-    // TODO efficiency by specifying rect?
-    while (!should_quit) {
-        // TODO event handling -> closing window should set should_quit for main thread to exit
-        // ? SDL_RenderClear(renderer);
-        SDL_UpdateTexture(screen_texture, NULL, pixels, 1024*4);
-        SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
-        SDL_RenderPresent(renderer);
-        SDL_Delay(33);
-    }
-    printf("stopping canvas thread\n");
-    canvas_close();
-    return NULL;
+void canvas_draw(void) {
+    // ? SDL_RenderClear(renderer);
+    SDL_UpdateTexture(screen_texture, NULL, pixels, 1024*4);
+    SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
+    SDL_RenderPresent(renderer);
 }
 
 void canvas_start(void) {
-    for (int i = 0; i < 1024*1024; i++) {
-        pixels[i] = 0xff;
-    }
-
     int status = SDL_Init(SDL_INIT_VIDEO);
     CLEANUP_AND_EXIT_IF(status != 0, "SDL_Init");
 
@@ -69,13 +61,6 @@ void canvas_start(void) {
             SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
             1024, 1024);
     CLEANUP_AND_EXIT_IF(screen_texture == NULL, "SDL_CreateTexture");
-
-    status = pthread_create(&canvas_thread, NULL, canvas_thread_main, NULL);
-    if (status != 0) {
-        printf("pthread_create: %d\n", status);
-        canvas_close();
-        exit(1);
-    }
 }
 
 void canvas_set_px(const struct pixel *px) {
@@ -83,4 +68,14 @@ void canvas_set_px(const struct pixel *px) {
         return;
     unsigned int index = px->x + 1024 * px->y;
     pixels[index] = (px->r << 24) | (px->g << 16) | (px->b << 8) | 0xff;
+}
+
+int canvas_should_quit(void) {
+    SDL_Event e;
+
+    while (SDL_PollEvent(&e) != 0) {
+        if (e.type == SDL_QUIT)
+            return 1;
+    }
+    return 0;
 }

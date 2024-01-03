@@ -7,12 +7,27 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
+#include "SDL.h"
 
 #include "common.h"
 #include "canvas.h"
 
+#define NUM_TRACKERS 1024
+struct connection_tracker {
+    in_addr_t addr;
+    unsigned long long start_time;
+    unsigned long long end_time;
+    unsigned long long num_pixels_read;
+    unsigned long long num_read_syscalls;
+    unsigned long long num_read_syscalls_blocked;
+    unsigned long long num_bytes_read;
+};
+struct connection_tracker trackers[NUM_TRACKERS];
+int trackerp = 0;
+
 #define CONN_BUF_SIZE 1024
 struct connection {
+    int tracking_idx;
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
     int read_pos;
@@ -44,6 +59,7 @@ void set_nonblocking(int fd) {
 }
 
 static void connection_close(struct connection *conn) {
+    trackers[conn->tracking_idx].end_time = SDL_GetTicks64(); // TODO use OS functionality
     close(conn->fd);
     conn->fd = -1;
 }
@@ -77,8 +93,10 @@ static int connection_get_from_buffer(struct connection *conn, struct pixel *px)
 }
 
 static int connection_get(struct connection *conn, struct pixel *px) {
-    if (connection_get_from_buffer(conn, px)) // fast path
+    if (connection_get_from_buffer(conn, px)) { // fast path
+        trackers[conn->tracking_idx].num_pixels_read++;
         return GET_SUCCESS;
+    }
     int nc = conn->write_pos - conn->read_pos;
     if (conn->read_pos > 0) {
         // there is not enough in the buffer. copy the rest and try reading
@@ -88,8 +106,11 @@ static int connection_get(struct connection *conn, struct pixel *px) {
         conn->write_pos = nc;
     }
     int status = read(conn->fd, &conn->buf[conn->write_pos], CONN_BUF_SIZE - conn->write_pos);
-    if (WOULD_BLOCK(status))
+    trackers[conn->tracking_idx].num_read_syscalls++;
+    if (WOULD_BLOCK(status)) {
+        trackers[conn->tracking_idx].num_read_syscalls_blocked++;
         return GET_WOULDBLOCK;
+    }
     else if (status == -1) {
         perror("read");
         exit(1); // TODO
@@ -97,7 +118,14 @@ static int connection_get(struct connection *conn, struct pixel *px) {
         return GET_CONNECTION_END;
     } else {
         conn->write_pos += status;
-        return connection_get_from_buffer(conn, px) ? GET_SUCCESS : GET_WOULDBLOCK;
+        trackers[conn->tracking_idx].num_bytes_read += status;
+        if (connection_get_from_buffer(conn, px)) {
+            trackers[conn->tracking_idx].num_pixels_read++;
+            return GET_SUCCESS;
+        } else {
+            trackers[conn->tracking_idx].num_read_syscalls_blocked++;
+            return GET_WOULDBLOCK;
+        }
     }
 }
 
@@ -139,6 +167,17 @@ static void *net_thread_main(void *arg) {
             c->fd = connfd;
             c->addr = connaddr;
             c->read_pos = c->write_pos = 0;
+            c->tracking_idx = trackerp;
+            trackers[trackerp].addr = c->addr.sin_addr.s_addr;
+            trackers[trackerp].start_time = SDL_GetTicks64(); // TODO use OS functionality
+            trackers[trackerp].end_time = 0;
+            trackers[trackerp].num_pixels_read = 0;
+            trackers[trackerp].num_read_syscalls = 0;
+            trackers[trackerp].num_read_syscalls_blocked = 0;
+            trackers[trackerp].num_bytes_read = 0;
+            trackerp++;
+            if (trackerp == NUM_TRACKERS)
+                exit(1); // TODO
 
             printf("accepted ");
             connection_print(c, free);
@@ -168,7 +207,7 @@ static void *net_thread_main(void *arg) {
     printf("closing network\n");
     for (int i = 0; i < MAX_CONNS; i++) {
         if (conns[i].fd != -1) {
-            close(conns[i].fd);
+            connection_close(&conns[i]);
         }
     }
     close(sockfd);
@@ -212,4 +251,17 @@ void net_start(void) {
 void net_stop(void) {
     should_quit = 1;
     pthread_join(net_thread, NULL);
+
+    for (int i = 0; i < trackerp; i++) {
+        struct connection_tracker *t = &trackers[i];
+        printf("Tracker {\n");
+        printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
+        printf("  start_time: %lld,\n", t->start_time);
+        printf("  end_time: %lld,\n", t->end_time);
+        printf("  num_pixels_read: %lld,\n", t->num_pixels_read);
+        printf("  num_read_syscalls: %lld,\n", t->num_read_syscalls);
+        printf("  num_read_syscalls_blocked: %lld,\n", t->num_read_syscalls_blocked);
+        printf("  num_bytes_read: %lld\n", t->num_bytes_read);
+        printf("}\n");
+    }
 }

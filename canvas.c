@@ -8,10 +8,15 @@
 #include "common.h"
 #include "canvas.h"
 
+#define TEX_SIZE_X 256
+#define TEX_SIZE_Y 256
+#define SCREEN_SIZE_X 1024
+#define SCREEN_SIZE_Y 1024
+
 SDL_Window *window;
 SDL_Renderer *renderer;
 SDL_Texture *screen_texture;
-unsigned int pixels[1024*1024*4]; // TODO race condition when setting pixels?
+unsigned int pixels[TEX_SIZE_X*TEX_SIZE_Y*4]; // TODO race condition when setting pixels?
 pthread_t canvas_thread;
 
 #define CLEANUP_AND_EXIT_IF(error_cond, prefix) do { \
@@ -40,7 +45,7 @@ void canvas_stop(void) {
 
 void canvas_draw(void) {
     // ? SDL_RenderClear(renderer);
-    SDL_UpdateTexture(screen_texture, NULL, pixels, 1024*4);
+    SDL_UpdateTexture(screen_texture, NULL, pixels, TEX_SIZE_X*4);
     SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
     SDL_RenderPresent(renderer);
 }
@@ -51,7 +56,7 @@ void canvas_start(void) {
 
     window = SDL_CreateWindow("pixelflut",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-            1024, 1024, 0);
+            SCREEN_SIZE_X, SCREEN_SIZE_Y, 0);
     CLEANUP_AND_EXIT_IF(window == NULL, "SDL_CreateWindow");
 
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
@@ -59,15 +64,16 @@ void canvas_start(void) {
     
     screen_texture = SDL_CreateTexture(renderer,
             SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
-            1024, 1024);
+            TEX_SIZE_X, TEX_SIZE_Y);
     CLEANUP_AND_EXIT_IF(screen_texture == NULL, "SDL_CreateTexture");
 }
 
-void canvas_set_px(const struct pixel *px) {
-    if (px->x >= 1024 || px->y >= 1024)
-        return;
-    unsigned int index = px->x + 1024 * px->y;
+int canvas_set_px(const struct pixel *px) {
+    if (px->x >= TEX_SIZE_X || px->y >= TEX_SIZE_Y)
+        return 0;
+    unsigned int index = px->x + TEX_SIZE_X * px->y;
     pixels[index] = (px->r << 24) | (px->g << 16) | (px->b << 8) | 0xff;
+    return 1;
 }
 
 int canvas_should_quit(void) {

@@ -7,12 +7,28 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
+#include "SDL.h"
 
 #include "common.h"
 #include "canvas.h"
 
+#define NUM_TRACKERS 1024
+struct connection_tracker {
+    in_addr_t addr;
+    unsigned long long start_time;
+    unsigned long long end_time;
+    unsigned long long num_pixels_read;
+    unsigned long long num_read_syscalls;
+    unsigned long long num_read_syscalls_blocked;
+    unsigned long long num_bytes_read;
+    unsigned long long num_pixels_outside_canvas;
+};
+struct connection_tracker trackers[NUM_TRACKERS];
+int trackerp = 0;
+
 #define CONN_BUF_SIZE 1024
 struct connection {
+    struct connection_tracker *tracker;
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
     int read_pos;
@@ -44,12 +60,14 @@ void set_nonblocking(int fd) {
 }
 
 static void connection_close(struct connection *conn) {
+    conn->tracker->end_time = SDL_GetTicks64(); // TODO use OS functionality
     close(conn->fd);
     conn->fd = -1;
 }
 
 // TODO incorporate alpha, or do some other funny commands (mix-multiply, mix-add)
 // TODO perhaps 12-bit x and 12-bit y?
+// TODO kernel operations?
 /* Message (8 byte)
  * 'P'
  * x (lo)
@@ -77,8 +95,10 @@ static int connection_get_from_buffer(struct connection *conn, struct pixel *px)
 }
 
 static int connection_get(struct connection *conn, struct pixel *px) {
-    if (connection_get_from_buffer(conn, px)) // fast path
+    if (connection_get_from_buffer(conn, px)) { // fast path
+        conn->tracker->num_pixels_read++;
         return GET_SUCCESS;
+    }
     int nc = conn->write_pos - conn->read_pos;
     if (conn->read_pos > 0) {
         // there is not enough in the buffer. copy the rest and try reading
@@ -88,8 +108,11 @@ static int connection_get(struct connection *conn, struct pixel *px) {
         conn->write_pos = nc;
     }
     int status = read(conn->fd, &conn->buf[conn->write_pos], CONN_BUF_SIZE - conn->write_pos);
-    if (WOULD_BLOCK(status))
+    conn->tracker->num_read_syscalls++;
+    if (WOULD_BLOCK(status)) {
+        conn->tracker->num_read_syscalls_blocked++;
         return GET_WOULDBLOCK;
+    }
     else if (status == -1) {
         perror("read");
         exit(1); // TODO
@@ -97,7 +120,14 @@ static int connection_get(struct connection *conn, struct pixel *px) {
         return GET_CONNECTION_END;
     } else {
         conn->write_pos += status;
-        return connection_get_from_buffer(conn, px) ? GET_SUCCESS : GET_WOULDBLOCK;
+        conn->tracker->num_bytes_read += status;
+        if (connection_get_from_buffer(conn, px)) {
+            conn->tracker->num_pixels_read++;
+            return GET_SUCCESS;
+        } else {
+            conn->tracker->num_read_syscalls_blocked++;
+            return GET_WOULDBLOCK;
+        }
     }
 }
 
@@ -108,6 +138,16 @@ static void connection_print(const struct connection *conn, int id) {
         printf(", id: %d }\n", id);
     else
         printf(" }\n");
+}
+
+struct connection_tracker *tracker_new(in_addr_t addr) {
+    if (trackerp == NUM_TRACKERS)
+        exit(1); // TODO
+    struct connection_tracker *t = &trackers[trackerp++];
+    memset(t, 0, sizeof(*t));
+    t->addr = addr;
+    t->start_time = SDL_GetTicks64();
+    return t;
 }
 
 static void *net_thread_main(void *arg) {
@@ -139,6 +179,7 @@ static void *net_thread_main(void *arg) {
             c->fd = connfd;
             c->addr = connaddr;
             c->read_pos = c->write_pos = 0;
+            c->tracker = tracker_new(c->addr.sin_addr.s_addr);
 
             printf("accepted ");
             connection_print(c, free);
@@ -153,7 +194,8 @@ static void *net_thread_main(void *arg) {
             if (status == GET_SUCCESS) {
                 // printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
                 // connection_print(&conns[i], i);
-                canvas_set_px(&px);
+                if (!canvas_set_px(&px))
+                    conns[i].tracker->num_pixels_outside_canvas++;
             } else if (status == GET_WOULDBLOCK) {
                 // do nothing
             } else { // if status == GET_CONNECTION_END
@@ -168,7 +210,7 @@ static void *net_thread_main(void *arg) {
     printf("closing network\n");
     for (int i = 0; i < MAX_CONNS; i++) {
         if (conns[i].fd != -1) {
-            close(conns[i].fd);
+            connection_close(&conns[i]);
         }
     }
     close(sockfd);
@@ -212,4 +254,18 @@ void net_start(void) {
 void net_stop(void) {
     should_quit = 1;
     pthread_join(net_thread, NULL);
+
+    for (int i = 0; i < trackerp; i++) {
+        struct connection_tracker *t = &trackers[i];
+        printf("Tracker {\n");
+        printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
+        printf("  start_time: %lld,\n", t->start_time);
+        printf("  end_time: %lld,\n", t->end_time);
+        printf("  num_pixels_read: %lld,\n", t->num_pixels_read);
+        printf("  num_read_syscalls: %lld,\n", t->num_read_syscalls);
+        printf("  num_read_syscalls_blocked: %lld,\n", t->num_read_syscalls_blocked);
+        printf("  num_bytes_read: %lld\n", t->num_bytes_read);
+        printf("  num_pixels_outside_canvas: %lld\n", t->num_pixels_outside_canvas);
+        printf("}\n");
+    }
 }

@@ -28,7 +28,7 @@ int trackerp = 0;
 
 #define CONN_BUF_SIZE 1024
 struct connection {
-    int tracking_idx;
+    struct connection_tracker *tracker;
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
     int read_pos;
@@ -60,13 +60,14 @@ void set_nonblocking(int fd) {
 }
 
 static void connection_close(struct connection *conn) {
-    trackers[conn->tracking_idx].end_time = SDL_GetTicks64(); // TODO use OS functionality
+    conn->tracker->end_time = SDL_GetTicks64(); // TODO use OS functionality
     close(conn->fd);
     conn->fd = -1;
 }
 
 // TODO incorporate alpha, or do some other funny commands (mix-multiply, mix-add)
 // TODO perhaps 12-bit x and 12-bit y?
+// TODO kernel operations?
 /* Message (8 byte)
  * 'P'
  * x (lo)
@@ -95,7 +96,7 @@ static int connection_get_from_buffer(struct connection *conn, struct pixel *px)
 
 static int connection_get(struct connection *conn, struct pixel *px) {
     if (connection_get_from_buffer(conn, px)) { // fast path
-        trackers[conn->tracking_idx].num_pixels_read++;
+        conn->tracker->num_pixels_read++;
         return GET_SUCCESS;
     }
     int nc = conn->write_pos - conn->read_pos;
@@ -107,9 +108,9 @@ static int connection_get(struct connection *conn, struct pixel *px) {
         conn->write_pos = nc;
     }
     int status = read(conn->fd, &conn->buf[conn->write_pos], CONN_BUF_SIZE - conn->write_pos);
-    trackers[conn->tracking_idx].num_read_syscalls++;
+    conn->tracker->num_read_syscalls++;
     if (WOULD_BLOCK(status)) {
-        trackers[conn->tracking_idx].num_read_syscalls_blocked++;
+        conn->tracker->num_read_syscalls_blocked++;
         return GET_WOULDBLOCK;
     }
     else if (status == -1) {
@@ -119,12 +120,12 @@ static int connection_get(struct connection *conn, struct pixel *px) {
         return GET_CONNECTION_END;
     } else {
         conn->write_pos += status;
-        trackers[conn->tracking_idx].num_bytes_read += status;
+        conn->tracker->num_bytes_read += status;
         if (connection_get_from_buffer(conn, px)) {
-            trackers[conn->tracking_idx].num_pixels_read++;
+            conn->tracker->num_pixels_read++;
             return GET_SUCCESS;
         } else {
-            trackers[conn->tracking_idx].num_read_syscalls_blocked++;
+            conn->tracker->num_read_syscalls_blocked++;
             return GET_WOULDBLOCK;
         }
     }
@@ -137,6 +138,16 @@ static void connection_print(const struct connection *conn, int id) {
         printf(", id: %d }\n", id);
     else
         printf(" }\n");
+}
+
+struct connection_tracker *tracker_new(in_addr_t addr) {
+    if (trackerp == NUM_TRACKERS)
+        exit(1); // TODO
+    struct connection_tracker *t = &trackers[trackerp++];
+    memset(t, 0, sizeof(*t));
+    t->addr = addr;
+    t->start_time = SDL_GetTicks64();
+    return t;
 }
 
 static void *net_thread_main(void *arg) {
@@ -168,18 +179,7 @@ static void *net_thread_main(void *arg) {
             c->fd = connfd;
             c->addr = connaddr;
             c->read_pos = c->write_pos = 0;
-            c->tracking_idx = trackerp;
-            trackers[trackerp].addr = c->addr.sin_addr.s_addr;
-            trackers[trackerp].start_time = SDL_GetTicks64(); // TODO use OS functionality
-            trackers[trackerp].end_time = 0;
-            trackers[trackerp].num_pixels_read = 0;
-            trackers[trackerp].num_read_syscalls = 0;
-            trackers[trackerp].num_read_syscalls_blocked = 0;
-            trackers[trackerp].num_bytes_read = 0;
-            trackers[trackerp].num_pixels_outside_canvas = 0;
-            trackerp++;
-            if (trackerp == NUM_TRACKERS)
-                exit(1); // TODO
+            c->tracker = tracker_new(c->addr.sin_addr.s_addr);
 
             printf("accepted ");
             connection_print(c, free);
@@ -195,7 +195,7 @@ static void *net_thread_main(void *arg) {
                 // printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
                 // connection_print(&conns[i], i);
                 if (!canvas_set_px(&px))
-                    trackers[conns[i].tracking_idx].num_pixels_outside_canvas++;
+                    conns[i].tracker->num_pixels_outside_canvas++;
             } else if (status == GET_WOULDBLOCK) {
                 // do nothing
             } else { // if status == GET_CONNECTION_END

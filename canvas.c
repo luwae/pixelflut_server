@@ -8,10 +8,10 @@
 #include "common.h"
 #include "canvas.h"
 
-#define TEX_SIZE_X 1024
-#define TEX_SIZE_Y 1024
-#define SCREEN_SIZE_X TEX_SIZE_X
-#define SCREEN_SIZE_Y TEX_SIZE_Y
+#define TEX_SIZE_X 256
+#define TEX_SIZE_Y 256
+#define SCREEN_SIZE_X 1024
+#define SCREEN_SIZE_Y 1024
 
 SDL_Window *window;
 SDL_Renderer *renderer;
@@ -68,11 +68,12 @@ void canvas_start(void) {
     CLEANUP_AND_EXIT_IF(screen_texture == NULL, "SDL_CreateTexture");
 }
 
-void canvas_set_px(const struct pixel *px) {
+int canvas_set_px(const struct pixel *px) {
     if (px->x >= TEX_SIZE_X || px->y >= TEX_SIZE_Y)
-        return;
+        return 0;
     unsigned int index = px->x + TEX_SIZE_X * px->y;
     pixels[index] = (px->r << 24) | (px->g << 16) | (px->b << 8) | 0xff;
+    return 1;
 }
 
 int canvas_should_quit(void) {

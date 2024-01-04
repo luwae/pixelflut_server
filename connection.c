@@ -21,6 +21,7 @@ struct connection_tracker {
     unsigned long long num_read_syscalls;
     unsigned long long num_read_syscalls_blocked;
     unsigned long long num_bytes_read;
+    unsigned long long num_pixels_outside_canvas;
 };
 struct connection_tracker trackers[NUM_TRACKERS];
 int trackerp = 0;
@@ -175,6 +176,7 @@ static void *net_thread_main(void *arg) {
             trackers[trackerp].num_read_syscalls = 0;
             trackers[trackerp].num_read_syscalls_blocked = 0;
             trackers[trackerp].num_bytes_read = 0;
+            trackers[trackerp].num_pixels_outside_canvas = 0;
             trackerp++;
             if (trackerp == NUM_TRACKERS)
                 exit(1); // TODO
@@ -192,7 +194,8 @@ static void *net_thread_main(void *arg) {
             if (status == GET_SUCCESS) {
                 // printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
                 // connection_print(&conns[i], i);
-                canvas_set_px(&px);
+                if (!canvas_set_px(&px))
+                    trackers[conns[i].tracking_idx].num_pixels_outside_canvas++;
             } else if (status == GET_WOULDBLOCK) {
                 // do nothing
             } else { // if status == GET_CONNECTION_END
@@ -262,6 +265,7 @@ void net_stop(void) {
         printf("  num_read_syscalls: %lld,\n", t->num_read_syscalls);
         printf("  num_read_syscalls_blocked: %lld,\n", t->num_read_syscalls_blocked);
         printf("  num_bytes_read: %lld\n", t->num_bytes_read);
+        printf("  num_pixels_outside_canvas: %lld\n", t->num_pixels_outside_canvas);
         printf("}\n");
     }
 }

@@ -76,6 +76,20 @@ int canvas_set_px(const struct pixel *px) {
     return 1;
 }
 
+int canvas_get_px(struct pixel *px) {
+    if (px->x >= TEX_SIZE_X || px->y >= TEX_SIZE_Y) {
+        px->r = 0;
+        px->g = 0;
+        px->b = 0;
+        return 0;
+    }
+    unsigned int index = px->x + TEX_SIZE_X * px->y;
+    px->r = (pixels[index] >> 24) & 0xff;
+    px->g = (pixels[index] >> 16) & 0xff;
+    px->b = (pixels[index] >>  8) & 0xff;
+    return 1;
+}
+
 int canvas_should_quit(void) {
     SDL_Event e;
 

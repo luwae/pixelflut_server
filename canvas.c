@@ -8,8 +8,8 @@
 #include "common.h"
 #include "canvas.h"
 
-#define TEX_SIZE_X 256
-#define TEX_SIZE_Y 256
+#define TEX_SIZE_X 512
+#define TEX_SIZE_Y 512
 #define SCREEN_SIZE_X 1024
 #define SCREEN_SIZE_Y 1024
 

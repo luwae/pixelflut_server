@@ -12,31 +12,46 @@
 #include "common.h"
 #include "canvas.h"
 
-/*
-#define NUM_TRACKERS 1024
 struct connection_tracker {
     in_addr_t addr;
     unsigned long long start_time;
     unsigned long long end_time;
     unsigned long long num_bytes_received_from_client;
-    unsigned long long num_pixels_received_from_client;
+    unsigned long long num_command_print;
+    unsigned long long num_command_get;
     unsigned long long num_read_syscalls;
     unsigned long long num_read_syscalls_wouldblock;
-    unsigned long long num_pixels_sent_to_client;
     unsigned long long num_bytes_sent_to_client;
+    unsigned long long num_pixels_sent_to_client;
     unsigned long long num_write_syscalls;
     unsigned long long num_write_syscalls_wouldblock;
     unsigned long long num_coords_outside_canvas;
 };
-struct connection_tracker trackers[NUM_TRACKERS];
-int trackerp = 0;
-*/
+
+static void connection_tracker_print(const struct connection_tracker *t) {
+    printf("Tracker {\n");
+    printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
+    printf("  start_time: %lld,\n", t->start_time);
+    printf("  end_time: %lld,\n", t->end_time);
+    printf("  num_bytes_received_from_client: %lld,\n", t->num_bytes_received_from_client);
+    printf("  num_command_print: %lld,\n", t->num_command_print);
+    printf("  num_command_get: %lld,\n", t->num_command_get);
+    printf("  num_read_syscalls: %lld,\n", t->num_read_syscalls);
+    printf("  num_read_syscalls_wouldblock: %lld,\n", t->num_read_syscalls_wouldblock);
+    printf("  num_bytes_sent_to_client: %lld,\n", t->num_bytes_sent_to_client);
+    printf("  num_pixels_sent_to_client: %lld,\n", t->num_pixels_sent_to_client);
+    printf("  num_write_syscalls: %lld,\n", t->num_write_syscalls);
+    printf("  num_write_syscalls_wouldblock: %lld,\n", t->num_write_syscalls_wouldblock);
+    printf("  num_coords_outside_canvas: %lld,\n", t->num_coords_outside_canvas);
+    printf("}\n");
+
+}
 
 #define CONN_BUF_SIZE 1024
 struct connection {
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
-    // struct connection_tracker *tracker;
+    struct connection_tracker tracker;
     int recv_read_pos;
     int recv_write_pos;
     int send_read_pos;
@@ -64,8 +79,11 @@ void set_nonblocking(int fd) {
     }
 }
 
+
 static void connection_close(struct connection *conn) {
-    // conn->tracker->end_time = SDL_GetTicks64(); // TODO use OS functionality
+    conn->tracker.end_time = SDL_GetTicks64(); // TODO use OS functionality
+    connection_tracker_print(&conn->tracker);
+
     close(conn->fd);
     conn->fd = -1;
 }
@@ -145,9 +163,9 @@ static int connection_recv(struct connection *conn, struct pixel *px) {
         conn->recv_write_pos = recvbuf_size;
     }
     status = read(conn->fd, &conn->recvbuf[conn->recv_write_pos], CONN_BUF_SIZE - conn->recv_write_pos);
-    // conn->tracker->num_read_syscalls++;
+    conn->tracker.num_read_syscalls += 1;
     if (WOULD_BLOCK(status)) {
-        // conn->tracker->num_read_syscalls_blocked++;
+        conn->tracker.num_read_syscalls_wouldblock += 1;
         return COMMAND_WOULDBLOCK;
     } else if (status == -1) {
         perror("read");
@@ -156,7 +174,7 @@ static int connection_recv(struct connection *conn, struct pixel *px) {
         return COMMAND_CONNECTION_END;
     } else {
         conn->recv_write_pos += status;
-        // conn->tracker->num_bytes_read += status;
+        conn->tracker.num_bytes_received_from_client += status;
         status = connection_recv_from_buffer(conn, px);
         if (status != COMMAND_NONE) {
             return status;
@@ -176,18 +194,6 @@ static void connection_print(const struct connection *conn, int id) {
     else
         printf(" }\n");
 }
-
-/*
-struct connection_tracker *tracker_new(in_addr_t addr) {
-    if (trackerp == NUM_TRACKERS)
-        exit(1); // TODO
-    struct connection_tracker *t = &trackers[trackerp++];
-    memset(t, 0, sizeof(*t));
-    t->addr = addr;
-    t->start_time = SDL_GetTicks64();
-    return t;
-}
-*/
 
 static void *net_thread_main(void *arg) {
     int sockfd = (int)(intptr_t)arg;
@@ -215,11 +221,11 @@ static void *net_thread_main(void *arg) {
             exit(1); // TODO
         } else if (connfd != -1) { // we found a new connection (no error and no wouldblock)
             set_nonblocking(connfd);
+            memset(c, 0, sizeof(*c)); // TODO not the buffers
             c->fd = connfd;
             c->addr = connaddr;
-            c->recv_read_pos = c->recv_write_pos = 0;
-            c->send_read_pos = c->send_write_pos = 0;
-            // c->tracker = tracker_new(c->addr.sin_addr.s_addr);
+            c->tracker.start_time = SDL_GetTicks64();
+            c->tracker.addr = connaddr.sin_addr.s_addr;
 
             printf("accepted ");
             connection_print(c, free);
@@ -243,11 +249,15 @@ static void *net_thread_main(void *arg) {
             if (status == COMMAND_FAULTY) {
                 // do nothing
             } else if (status == COMMAND_PRINT) {
+                c->tracker.num_command_print += 1;
                 if (!canvas_set_px(&px)) {
-                    // conns[i].tracker->num_pixels_outside_canvas++;
+                    c->tracker.num_coords_outside_canvas += 1;
                 }
             } else if (status == COMMAND_GET) {
                 int inside_canvas = canvas_get_px(&px);
+                c->tracker.num_command_get += 1;
+                if (!inside_canvas)
+                    c->tracker.num_coords_outside_canvas += 1;
                 // put pixel data in sendbuffer. We already know we have enough space.
                 // If coordinates are outside range, send (0,0,0)
                 // we can't send nothing because the client expects pixel data,
@@ -283,12 +293,20 @@ static void *net_thread_main(void *arg) {
             sendbuf_size = c->send_write_pos - c->send_read_pos; // might have changed
             if (sendbuf_size > 0) {
                 status = write(c->fd, &c->sendbuf[c->send_read_pos], sendbuf_size);
+                c->tracker.num_write_syscalls += 1;
                 if (IS_REAL_ERROR(status)) {
                     perror("write");
                     exit(1); // TODO
+                } else if (WOULD_BLOCK(status)) {
+                    c->tracker.num_write_syscalls_wouldblock += 1;
                 }
                 if (status > 0) {
                     c->send_read_pos += status;
+                    c->tracker.num_bytes_sent_to_client += status;
+                    if (status % 4) {
+                        printf("WARNING: data sent to client not divisible by 4.\n");
+                    }
+                    c->tracker.num_pixels_sent_to_client += status / 4;
                 }
             }
         }

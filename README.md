@@ -8,16 +8,16 @@ This server implements a binary protocol. Integers are usually sent in little-en
 
 ### Print pixel
 
-| Byte | Content     |
-| ----:| ----------- |
-| 0    | `'P'`       |
-| 1    | `x[0..=7]`  |
-| 2    | `x[8..=15]` |
-| 3    | `x[0..=7]`  |
-| 4    | `x[8..=15]` |
-| 5    | `r`         |
-| 6    | `g`         |
-| 7    | `b`         |
+| Byte | Content      |
+| ----:| ------------ |
+| 0    | `'P' (0x50)` |
+| 1    | `x[0..=7]`   |
+| 2    | `x[8..=15]`  |
+| 3    | `y[0..=7]`   |
+| 4    | `y[8..=15]   |
+| 5    | `r`          |
+| 6    | `g`          |
+| 7    | `b`          |
 
 #### Error handling
 
@@ -27,16 +27,16 @@ This server implements a binary protocol. Integers are usually sent in little-en
 
 ### Get Pixel
 
-| Byte | Content     |
-| ----:| ----------- |
-| 0    | `'G'`       |
-| 1    | `x[0..=7]`  |
-| 2    | `x[8..=15]` |
-| 3    | `x[0..=7]`  |
-| 4    | `x[8..=15]` |
-| 5    | undefined   |
-| 6    | undefined   |
-| 7    | undefined   |
+| Byte | Content      |
+| ----:| ------------ |
+| 0    | `'G' (0x47)` |
+| 1    | `x[0..=7]`   |
+| 2    | `x[8..=15]`  |
+| 3    | `y[0..=7]`   |
+| 4    | `y[8..=15]`  |
+| 5    | undefined    |
+| 6    | undefined    |
+| 7    | undefined    |
 
 #### Response format
 
@@ -56,17 +56,17 @@ The server sends back the following bytes:
 
 
 
-### Print multiple pixels
+### Rectangle print
 
 This command first specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.
 
 | Byte | Content                                                              |
 | ----:| -------------------------------------------------------------------- |
-| 0    | `'P'`                                                                |
+| 0    | `'p' (0x70)`                                                         |
 | 1    | `x[0..=7]`                                                           |
 | 2    | `x[8..=15]`                                                          |
-| 3    | `x[0..=7]`                                                           |
-| 4    | `x[8..=15]`                                                          |
+| 3    | `y[0..=7]`                                                           |
+| 4    | `y[8..=15]`                                                          |
 | 5    | `w[0..=7]`                                                           |
 | 5    | `h[0..=7]`                                                           |
 | 7    | from high to low bits: `h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]` |
@@ -86,3 +86,31 @@ The server now expects the client to send `w*h` color values with 4 bytes each. 
 
  - It is allowed to define a rectangle with `w = 0` and `h = 0`. In this case, The server ignores the command.
  - It is allowed to define a rectangle which escapes screen bounds. In this case, the server still expects `w*h` pixels; the ones outside are then ignored.
+
+
+
+### Rectangle get
+
+This command specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.
+
+| Byte | Content                                                              |
+| ----:| -------------------------------------------------------------------- |
+| 0    | `'g' (0x67)`                                                         |
+| 1    | `x[0..=7]`                                                           |
+| 2    | `x[8..=15]`                                                          |
+| 3    | `y[0..=7]`                                                           |
+| 4    | `y[8..=15]`                                                          |
+| 5    | `w[0..=7]`                                                           |
+| 5    | `h[0..=7]`                                                           |
+| 7    | from high to low bits: `h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]` |
+
+#### Pixel format
+
+The server sends back `w*h` color values with 4 bytes each. The order is left-to-right and top-to-bottom.
+
+The pixel format is the same as for the _get pixel_ command.
+
+#### Error handling
+
+ - It is allowed to define a rectangle with `w = 0` and `h = 0`. In this case, The server ignores the command.
+ - It is allowed to define a rectangle which escapes screen bounds. In this case, the server still sends `w*h` pixels; the ones outside are black (and marked as such in the 4th byte).

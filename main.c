@@ -10,8 +10,8 @@
 #include "SDL.h"
 
 #include "common.h"
-#include "connection.h"
 #include "canvas.h"
+#include "net.h"
 
 #define FPS 30
 #define MS_PER_FRAME (1000 / (FPS))

@@ -96,8 +96,54 @@ void connection_close(struct connection *c) {
  * inside canvas -> 1; outside canvas -> 0
  */
 
+int rect_iter_done(struct rect_iter *r) {
+    return r->y == r->ystop;
+}
+
+void rect_iter_advance(struct rect_iter *r) {
+    if (rect_iter_done(r))
+        return; // TODO panic?
+    r->x += 1;
+    if (r->x == r->xstop) {
+        r->x = r->xstart;
+        r->y += 1;
+    }
+}
+
+int connection_recv_from_multi(struct connection *conn, struct pixel *px) {
+    if (!rect_iter_done(&conn->multirecv)) {
+        if (conn->recv_write_pos - conn->recv_read_pos < 4)
+            return COMMAND_NONE;
+        unsigned char *rp = &conn->recvbuf[conn->recv_read_pos];
+        conn->recv_read_pos += 4;
+        px->x = conn->multirecv.x;
+        px->y = conn->multirecv.y;
+        px->r = rp[0];
+        px->g = rp[1];
+        px->b = rp[2];
+        rect_iter_advance(&conn->multirecv);
+        return COMMAND_MULTIRECV;
+    } else {
+        return COMMAND_MULTIRECV_DONE;
+    }
+}
+/*
+ * 'p' / 'g'
+ * x (lo)
+ * x (hi)
+ * y (lo)
+ * y (hi)
+ * w [0..=7]
+ * h [0..=7]
+ * high to low: h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]
+ */
 
 int connection_recv_from_buffer(struct connection *conn, struct pixel *px) {
+    int status = connection_recv_from_multi(conn, px);
+    if (status != COMMAND_MULTIRECV_DONE)
+        return status;
+
+    // we need to read the next 'real' command
     if (conn->recv_write_pos - conn->recv_read_pos < 8)
         return COMMAND_NONE;
     unsigned char *rp = &conn->recvbuf[conn->recv_read_pos];
@@ -113,7 +159,25 @@ int connection_recv_from_buffer(struct connection *conn, struct pixel *px) {
         px->x = rp[1] | (rp[2] << 8);
         px->y = rp[3] | (rp[4] << 8);
         return COMMAND_GET;
-    } else {
+    } else if (rp[0] == 'p') {
+        struct rect_iter *r = &conn->multirecv;
+        r->xstart = rp[1] | (rp[2] << 8);
+        r->x = r->xstart;
+        r->ystart = rp[3] | (rp[4] << 8);
+        r->y = r->ystart;
+        int w = rp[5] | ((rp[7] & 0x0f) << 8);
+        int h = rp[6] | ((rp[7] & 0xf0) << 4);
+        if (w == 0 || h == 0) {
+            // user is penalized for sending an empty rect
+            r->xstop = r->xstart;
+            r->ystop = r->ystart;
+            return COMMAND_FAULTY;
+        }
+        r->xstop = r->xstart + w;
+        r->ystop = r->ystart + h;
+        return connection_recv_from_multi(conn, px); // TODO assert that this is not COMMAND_MULTIRECV_DONE
+                                                  // TODO do we want this here immediately? or really only read <=8 bytes per call?
+    }  else {
         return COMMAND_FAULTY;
     }
 }
@@ -126,12 +190,11 @@ int connection_recv(struct connection *conn, struct pixel *px) {
     int recvbuf_size = conn->recv_write_pos - conn->recv_read_pos;
     if (conn->recv_read_pos > 0) {
         // there is not enough in the buffer. copy the rest and try reading
-        // we can use memcpy because there are less than 8 bytes to be copied
-        memcpy(conn->recvbuf, &conn->recvbuf[conn->recv_read_pos], recvbuf_size);
+        memmove(conn->recvbuf, &conn->recvbuf[conn->recv_read_pos], recvbuf_size);
         conn->recv_read_pos = 0;
         conn->recv_write_pos = recvbuf_size;
     }
-    status = read(conn->fd, &conn->recvbuf[conn->recv_write_pos], CONN_BUF_SIZE - conn->recv_write_pos);
+    status = read(conn->fd, &conn->recvbuf[conn->recv_write_pos], CONN_BUF_SIZE - recvbuf_size);
     conn->tracker.num_read_syscalls += 1;
     if (WOULD_BLOCK(status)) {
         conn->tracker.num_read_syscalls_wouldblock += 1;
@@ -148,8 +211,8 @@ int connection_recv(struct connection *conn, struct pixel *px) {
         if (status != COMMAND_NONE) {
             return status;
         } else {
-            // we still don't have enough bytes. just interpret this as wouldblock
-            // NOTE for later: don't increase num_read_syscalls_wouldblock here
+            // we still don't have enough bytes. just interpret this as wouldblock.
+            // don't increase num_read_syscalls_wouldblock here
             return COMMAND_WOULDBLOCK;
         }
     }

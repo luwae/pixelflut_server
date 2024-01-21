@@ -23,6 +23,17 @@ struct connection_tracker {
 
 void connection_tracker_print(const struct connection_tracker *t);
 
+struct rect_iter {
+    int xstart;
+    int ystart;
+    int xstop;
+    int ystop;
+    int x;
+    int y;
+};
+
+void rect_iter_advance(struct rect_iter *r);
+
 #define CONN_BUF_SIZE 1024
 struct connection {
     int fd; // fd == -1 means free
@@ -30,6 +41,8 @@ struct connection {
     struct connection_tracker tracker;
     int recv_read_pos;
     int recv_write_pos;
+    struct rect_iter multirecv;
+
     int send_read_pos;
     int send_write_pos;
     unsigned char recvbuf[CONN_BUF_SIZE];
@@ -42,9 +55,12 @@ void connection_close(struct connection *conn);
 #define COMMAND_NONE 0 // only used by connection_recv_from_buffer
 #define COMMAND_FAULTY 1
 #define COMMAND_PRINT 2
-#define COMMAND_GET 3
-#define COMMAND_WOULDBLOCK 4 // only used by connection_recv
-#define COMMAND_CONNECTION_END 5 // only used by connection_recv
+#define COMMAND_MULTIRECV 3
+#define COMMAND_MULTIRECV_DONE 4
+#define COMMAND_GET 5
+#define COMMAND_WOULDBLOCK 6 // only used by connection_recv
+#define COMMAND_CONNECTION_END 7 // only used by connection_recv
+int connection_recv_from_multi(struct connection *conn, struct pixel *px);
 int connection_recv_from_buffer(struct connection *conn, struct pixel *px);
 int connection_recv(struct connection *conn, struct pixel *px);
 

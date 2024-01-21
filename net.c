@@ -66,7 +66,7 @@ static void *net_thread_main(void *arg) {
             int status = connection_recv(c, &px);
             if (status == COMMAND_FAULTY) {
                 // do nothing
-            } else if (status == COMMAND_PRINT) {
+            } else if (status == COMMAND_PRINT || status == COMMAND_MULTIRECV) {
                 c->tracker.num_command_print += 1;
                 if (!canvas_set_px(&px)) {
                     c->tracker.num_coords_outside_canvas += 1;

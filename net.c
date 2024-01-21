@@ -148,7 +148,16 @@ void net_start(void) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("socket");
-        exit(0);
+        exit(1);
+    }
+
+    /* make the address immediatly reusable after the listening socket will have
+     * been closed */
+    int should_reuse_address = 1;
+    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &should_reuse_address,
+        sizeof(should_reuse_address))) {
+        perror("setsockopt");
+        exit(1);
     }
 
     struct sockaddr_in servaddr = {0};

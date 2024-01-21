@@ -8,8 +8,8 @@
 #include "common.h"
 #include "canvas.h"
 
-#define TEX_SIZE_X 256
-#define TEX_SIZE_Y 256
+#define TEX_SIZE_X 512
+#define TEX_SIZE_Y 512
 #define SCREEN_SIZE_X 1024
 #define SCREEN_SIZE_Y 1024
 
@@ -73,6 +73,20 @@ int canvas_set_px(const struct pixel *px) {
         return 0;
     unsigned int index = px->x + TEX_SIZE_X * px->y;
     pixels[index] = (px->r << 24) | (px->g << 16) | (px->b << 8) | 0xff;
+    return 1;
+}
+
+int canvas_get_px(struct pixel *px) {
+    if (px->x >= TEX_SIZE_X || px->y >= TEX_SIZE_Y) {
+        px->r = 0;
+        px->g = 0;
+        px->b = 0;
+        return 0;
+    }
+    unsigned int index = px->x + TEX_SIZE_X * px->y;
+    px->r = (pixels[index] >> 24) & 0xff;
+    px->g = (pixels[index] >> 16) & 0xff;
+    px->b = (pixels[index] >>  8) & 0xff;
     return 1;
 }
 

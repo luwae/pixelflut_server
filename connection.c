@@ -12,33 +12,53 @@
 #include "common.h"
 #include "canvas.h"
 
-#define NUM_TRACKERS 1024
 struct connection_tracker {
     in_addr_t addr;
     unsigned long long start_time;
     unsigned long long end_time;
-    unsigned long long num_pixels_read;
+    unsigned long long num_bytes_received_from_client;
+    unsigned long long num_command_print;
+    unsigned long long num_command_get;
     unsigned long long num_read_syscalls;
-    unsigned long long num_read_syscalls_blocked;
-    unsigned long long num_bytes_read;
-    unsigned long long num_pixels_outside_canvas;
+    unsigned long long num_read_syscalls_wouldblock;
+    unsigned long long num_bytes_sent_to_client;
+    unsigned long long num_pixels_sent_to_client;
+    unsigned long long num_write_syscalls;
+    unsigned long long num_write_syscalls_wouldblock;
+    unsigned long long num_coords_outside_canvas;
 };
-struct connection_tracker trackers[NUM_TRACKERS];
-int trackerp = 0;
+
+static void connection_tracker_print(const struct connection_tracker *t) {
+    printf("Tracker {\n");
+    printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
+    printf("  start_time: %lld,\n", t->start_time);
+    printf("  end_time: %lld,\n", t->end_time);
+    printf("  num_bytes_received_from_client: %lld,\n", t->num_bytes_received_from_client);
+    printf("  num_command_print: %lld,\n", t->num_command_print);
+    printf("  num_command_get: %lld,\n", t->num_command_get);
+    printf("  num_read_syscalls: %lld,\n", t->num_read_syscalls);
+    printf("  num_read_syscalls_wouldblock: %lld,\n", t->num_read_syscalls_wouldblock);
+    printf("  num_bytes_sent_to_client: %lld,\n", t->num_bytes_sent_to_client);
+    printf("  num_pixels_sent_to_client: %lld,\n", t->num_pixels_sent_to_client);
+    printf("  num_write_syscalls: %lld,\n", t->num_write_syscalls);
+    printf("  num_write_syscalls_wouldblock: %lld,\n", t->num_write_syscalls_wouldblock);
+    printf("  num_coords_outside_canvas: %lld,\n", t->num_coords_outside_canvas);
+    printf("}\n");
+
+}
 
 #define CONN_BUF_SIZE 1024
 struct connection {
-    struct connection_tracker *tracker;
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
-    int read_pos;
-    int write_pos;
-    unsigned char buf[CONN_BUF_SIZE];
+    struct connection_tracker tracker;
+    int recv_read_pos;
+    int recv_write_pos;
+    int send_read_pos;
+    int send_write_pos;
+    unsigned char recvbuf[CONN_BUF_SIZE];
+    unsigned char sendbuf[CONN_BUF_SIZE];
 };
-
-#define GET_SUCCESS 0
-#define GET_WOULDBLOCK 1
-#define GET_CONNECTION_END 2
 
 #define PORT 1337
 
@@ -59,13 +79,17 @@ void set_nonblocking(int fd) {
     }
 }
 
+
 static void connection_close(struct connection *conn) {
-    conn->tracker->end_time = SDL_GetTicks64(); // TODO use OS functionality
+    conn->tracker.end_time = SDL_GetTicks64(); // TODO use OS functionality
+    connection_tracker_print(&conn->tracker);
+
     close(conn->fd);
     conn->fd = -1;
 }
 
 // TODO incorporate alpha, or do some other funny commands (mix-multiply, mix-add)
+// TODO perhaps we don't need alpha, since we have the pixel read functionality
 // TODO perhaps 12-bit x and 12-bit y?
 // TODO kernel operations?
 /* Message (8 byte)
@@ -79,54 +103,85 @@ static void connection_close(struct connection *conn) {
  * b
  */
 
-static int connection_get_from_buffer(struct connection *conn, struct pixel *px) {
-    if (conn->write_pos - conn->read_pos < 8)
-        return 0;
-    int rp = conn->read_pos;
-    conn->read_pos += 8; // advance
-    if (conn->buf[rp] != 'P')
-        return 0;
-    px->x = conn->buf[rp + 1] | (conn->buf[rp + 2] << 8);
-    px->y = conn->buf[rp + 3] | (conn->buf[rp + 4] << 8);
-    px->r = conn->buf[rp + 5];
-    px->g = conn->buf[rp + 6];
-    px->b = conn->buf[rp + 7];
-    return 1;
+/* Message (8 byte)
+ * 'G'
+ * x (lo)
+ * x (hi)
+ * y (lo)
+ * y (hi)
+ * -- padding --
+ * -- padding --
+ * -- padding --
+ */
+
+/* Answer (4 bytes)
+ * r
+ * g
+ * b
+ * inside canvas -> 1; outside canvas -> 0
+ */
+
+#define COMMAND_NONE 0 // only used by connection_recv_from_buffer
+#define COMMAND_FAULTY 1
+#define COMMAND_PRINT 2
+#define COMMAND_GET 3
+#define COMMAND_WOULDBLOCK 4 // only used by connection_recv
+#define COMMAND_CONNECTION_END 5 // only used by connection_recv
+
+static int connection_recv_from_buffer(struct connection *conn, struct pixel *px) {
+    if (conn->recv_write_pos - conn->recv_read_pos < 8)
+        return COMMAND_NONE;
+    unsigned char *rp = &conn->recvbuf[conn->recv_read_pos];
+    conn->recv_read_pos += 8; // advance, even if faulty
+    if (rp[0] == 'P') {
+        px->x = rp[1] | (rp[2] << 8);
+        px->y = rp[3] | (rp[4] << 8);
+        px->r = rp[5];
+        px->g = rp[6];
+        px->b = rp[7];
+        return COMMAND_PRINT;
+    } else if (rp[0] == 'G') {
+        px->x = rp[1] | (rp[2] << 8);
+        px->y = rp[3] | (rp[4] << 8);
+        return COMMAND_GET;
+    } else {
+        return COMMAND_FAULTY;
+    }
 }
 
-static int connection_get(struct connection *conn, struct pixel *px) {
-    if (connection_get_from_buffer(conn, px)) { // fast path
-        conn->tracker->num_pixels_read++;
-        return GET_SUCCESS;
-    }
-    int nc = conn->write_pos - conn->read_pos;
-    if (conn->read_pos > 0) {
+static int connection_recv(struct connection *conn, struct pixel *px) {
+    int status = connection_recv_from_buffer(conn, px); // fast path - we already read enough
+    if (status != COMMAND_NONE)
+        return status; // on faulty command, client is skipped (does nothing).
+
+    int recvbuf_size = conn->recv_write_pos - conn->recv_read_pos;
+    if (conn->recv_read_pos > 0) {
         // there is not enough in the buffer. copy the rest and try reading
         // we can use memcpy because there are less than 8 bytes to be copied
-        memcpy(conn->buf, &conn->buf[conn->read_pos], nc);
-        conn->read_pos = 0;
-        conn->write_pos = nc;
+        memcpy(conn->recvbuf, &conn->recvbuf[conn->recv_read_pos], recvbuf_size);
+        conn->recv_read_pos = 0;
+        conn->recv_write_pos = recvbuf_size;
     }
-    int status = read(conn->fd, &conn->buf[conn->write_pos], CONN_BUF_SIZE - conn->write_pos);
-    conn->tracker->num_read_syscalls++;
+    status = read(conn->fd, &conn->recvbuf[conn->recv_write_pos], CONN_BUF_SIZE - conn->recv_write_pos);
+    conn->tracker.num_read_syscalls += 1;
     if (WOULD_BLOCK(status)) {
-        conn->tracker->num_read_syscalls_blocked++;
-        return GET_WOULDBLOCK;
-    }
-    else if (status == -1) {
+        conn->tracker.num_read_syscalls_wouldblock += 1;
+        return COMMAND_WOULDBLOCK;
+    } else if (status == -1) {
         perror("read");
         exit(1); // TODO
     } else if (status == 0) {
-        return GET_CONNECTION_END;
+        return COMMAND_CONNECTION_END;
     } else {
-        conn->write_pos += status;
-        conn->tracker->num_bytes_read += status;
-        if (connection_get_from_buffer(conn, px)) {
-            conn->tracker->num_pixels_read++;
-            return GET_SUCCESS;
+        conn->recv_write_pos += status;
+        conn->tracker.num_bytes_received_from_client += status;
+        status = connection_recv_from_buffer(conn, px);
+        if (status != COMMAND_NONE) {
+            return status;
         } else {
-            conn->tracker->num_read_syscalls_blocked++;
-            return GET_WOULDBLOCK;
+            // we still don't have enough bytes. just interpret this as wouldblock
+            // NOTE for later: don't increase num_read_syscalls_wouldblock here
+            return COMMAND_WOULDBLOCK;
         }
     }
 }
@@ -138,16 +193,6 @@ static void connection_print(const struct connection *conn, int id) {
         printf(", id: %d }\n", id);
     else
         printf(" }\n");
-}
-
-struct connection_tracker *tracker_new(in_addr_t addr) {
-    if (trackerp == NUM_TRACKERS)
-        exit(1); // TODO
-    struct connection_tracker *t = &trackers[trackerp++];
-    memset(t, 0, sizeof(*t));
-    t->addr = addr;
-    t->start_time = SDL_GetTicks64();
-    return t;
 }
 
 static void *net_thread_main(void *arg) {
@@ -174,12 +219,13 @@ static void *net_thread_main(void *arg) {
         if (IS_REAL_ERROR(connfd)) {
             perror("accept");
             exit(1); // TODO
-        } else if (connfd != -1) {
+        } else if (connfd != -1) { // we found a new connection (no error and no wouldblock)
             set_nonblocking(connfd);
+            memset(c, 0, sizeof(*c)); // TODO not the buffers
             c->fd = connfd;
             c->addr = connaddr;
-            c->read_pos = c->write_pos = 0;
-            c->tracker = tracker_new(c->addr.sin_addr.s_addr);
+            c->tracker.start_time = SDL_GetTicks64();
+            c->tracker.addr = connaddr.sin_addr.s_addr;
 
             printf("accepted ");
             connection_print(c, free);
@@ -188,21 +234,80 @@ static void *net_thread_main(void *arg) {
         // move through all connections
         struct pixel px;
         for (int i = 0; i < MAX_CONNS; i++) {
-            if (conns[i].fd == -1)
+            c = &conns[i];
+            if (c->fd == -1)
                 continue;
-            int status = connection_get(&conns[i], &px);
-            if (status == GET_SUCCESS) {
-                // printf("Pixel { x: %u y: %u col: (%d, %d, %d) } from ", px.x, px.y, px.r, px.g, px.b);
-                // connection_print(&conns[i], i);
-                if (!canvas_set_px(&px))
-                    conns[i].tracker->num_pixels_outside_canvas++;
-            } else if (status == GET_WOULDBLOCK) {
-                // do nothing
-            } else { // if status == GET_CONNECTION_END
-                printf("close ");
-                connection_print(&conns[i], i);
+            // the client is only allowed to send a command to the server if it has
+            // enough space in its send buffer for us to be able to incorporate the
+            // command.
+            int sendbuf_size = c->send_write_pos - c->send_read_pos;
+            if (sendbuf_size == CONN_BUF_SIZE) {
+                continue;
+            }
 
-                connection_close(&conns[i]);
+            int status = connection_recv(c, &px);
+            if (status == COMMAND_FAULTY) {
+                // do nothing
+            } else if (status == COMMAND_PRINT) {
+                c->tracker.num_command_print += 1;
+                if (!canvas_set_px(&px)) {
+                    c->tracker.num_coords_outside_canvas += 1;
+                }
+            } else if (status == COMMAND_GET) {
+                int inside_canvas = canvas_get_px(&px);
+                c->tracker.num_command_get += 1;
+                if (!inside_canvas)
+                    c->tracker.num_coords_outside_canvas += 1;
+                // put pixel data in sendbuffer. We already know we have enough space.
+                // If coordinates are outside range, send (0,0,0)
+                // we can't send nothing because the client expects pixel data,
+                // and it might be easier to avoid edge conditions
+                // TODO perhaps a flag if it was inside or outside range, but then
+                // 4 bytes won't be enough anymore
+                if (c->send_write_pos == CONN_BUF_SIZE) { // need to move the buffer
+                    memmove(c->sendbuf, &c->sendbuf[c->send_read_pos], sendbuf_size);
+                    c->send_read_pos = 0;
+                    c->send_write_pos = sendbuf_size;
+                }
+                unsigned char *sp = &c->sendbuf[c->send_write_pos];
+                c->send_write_pos += 4;
+                sp[0] = px.r;
+                sp[1] = px.g;
+                sp[2] = px.b;
+                sp[3] = inside_canvas;
+            } else if (status == COMMAND_WOULDBLOCK) {
+                // do nothing
+            } else if (status == COMMAND_CONNECTION_END) {
+                printf("close ");
+                connection_print(c, i);
+
+                connection_close(c);
+                continue;
+            } else {
+                printf("wtf");
+                exit(1);
+            }
+
+            // try writing the sendbuffer (nonblock)
+            // this only happens if the connection is not closed yet
+            sendbuf_size = c->send_write_pos - c->send_read_pos; // might have changed
+            if (sendbuf_size > 0) {
+                status = write(c->fd, &c->sendbuf[c->send_read_pos], sendbuf_size);
+                c->tracker.num_write_syscalls += 1;
+                if (IS_REAL_ERROR(status)) {
+                    perror("write");
+                    exit(1); // TODO
+                } else if (WOULD_BLOCK(status)) {
+                    c->tracker.num_write_syscalls_wouldblock += 1;
+                }
+                if (status > 0) {
+                    c->send_read_pos += status;
+                    c->tracker.num_bytes_sent_to_client += status;
+                    if (status % 4) {
+                        printf("WARNING: data sent to client not divisible by 4.\n");
+                    }
+                    c->tracker.num_pixels_sent_to_client += status / 4;
+                }
             }
         }
     }
@@ -255,17 +360,19 @@ void net_stop(void) {
     should_quit = 1;
     pthread_join(net_thread, NULL);
 
+    /*
     for (int i = 0; i < trackerp; i++) {
         struct connection_tracker *t = &trackers[i];
         printf("Tracker {\n");
         printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
         printf("  start_time: %lld,\n", t->start_time);
         printf("  end_time: %lld,\n", t->end_time);
-        printf("  num_pixels_read: %lld,\n", t->num_pixels_read);
+        printf("  num_pixels_written: %lld,\n", t->num_pixels_written);
         printf("  num_read_syscalls: %lld,\n", t->num_read_syscalls);
         printf("  num_read_syscalls_blocked: %lld,\n", t->num_read_syscalls_blocked);
         printf("  num_bytes_read: %lld\n", t->num_bytes_read);
         printf("  num_pixels_outside_canvas: %lld\n", t->num_pixels_outside_canvas);
         printf("}\n");
     }
+    */
 }

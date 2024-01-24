@@ -19,7 +19,7 @@ This server implements a binary protocol. Integers are usually sent in little-en
 | 6    | `g`          |
 | 7    | `b`          |
 
-#### Error handling
+#### Notes
 
  - It is allowed to print a pixel outside of screen bounds. In this case, the server ignores the command.
 
@@ -49,10 +49,11 @@ The server sends back the following bytes:
 | 2    | `b`                                           |
 | 3    | if pixel was inside canvas `1`, otherwise `0` |
 
-#### Error handling
+#### Notes
 
  - Even though the last 3 bytes are not used, they still must be sent. The server will not start processing the request until all 8 bytes have been received.
  - It is allowed to request a pixel outside of screen bounds. In this case, the server returns `r = g = b = 0`. The last byte of the anser may be used to determine if this was the case, or if it was a black pixel inside the screen.
+ - It is an error to send a command after a get command without having received its answer. The server may not read further commands from this client until the result of the get command has been read.
 
 
 
@@ -114,3 +115,4 @@ The pixel format is the same as for the _get pixel_ command.
 
  - It is allowed to define a rectangle with `w = 0` and `h = 0`. In this case, The server ignores the command.
  - It is allowed to define a rectangle which escapes screen bounds. In this case, the server still sends `w*h` pixels; the ones outside are black (and marked as such in the 4th byte).
+ - It is an error to send a command after a get command without having received its answer. The server may not read further commands from this client until the result of the get command has been read.

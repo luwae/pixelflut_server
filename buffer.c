@@ -74,7 +74,7 @@ const unsigned char *buffer_read_reserve(struct buffer *b, size_t size) {
 
 unsigned char *buffer_write_reserve(struct buffer *b, size_t size) {
     unsigned char *p = NULL;
-    if (buffer_write_space(p) >= size) {
+    if (buffer_write_space(b) >= size) {
         p = &b->data[b->write_pos];
         b->write_pos += size;
     }

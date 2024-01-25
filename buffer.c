@@ -29,7 +29,7 @@ size_t buffer_write_space(const struct buffer *b) {
 void buffer_move_front(struct buffer *b) {
     if (b->read_pos > 0) {
         size_t size = buffer_size(b);
-        memmove(b->data, &b->data[b->read_pos], buffer_size(b));
+        memmove(b->data, &b->data[b->read_pos], size);
         b->read_pos = 0;
         b->write_pos = size;
     }
@@ -74,7 +74,7 @@ const unsigned char *buffer_read_reserve(struct buffer *b, size_t size) {
 
 unsigned char *buffer_write_reserve(struct buffer *b, size_t size) {
     unsigned char *p = NULL;
-    if (CONN_BUF_SIZE - b->write_pos >= size) {
+    if (buffer_write_space(p) >= size) {
         p = &b->data[b->write_pos];
         b->write_pos += size;
     }

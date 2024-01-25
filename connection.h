@@ -2,6 +2,7 @@
 #define PFS_CONNECTION_H
 
 #include <sys/socket.h>
+#include "buffer.h"
 
 void set_nonblocking(int fd);
 
@@ -9,45 +10,33 @@ struct connection_tracker {
     in_addr_t addr;
     unsigned long long start_time;
     unsigned long long end_time;
-    unsigned long long num_bytes_received_from_client;
-    unsigned long long num_command_print;
-    unsigned long long num_command_get;
-    unsigned long long num_read_syscalls;
-    unsigned long long num_read_syscalls_wouldblock;
-    unsigned long long num_bytes_sent_to_client;
-    unsigned long long num_pixels_sent_to_client;
-    unsigned long long num_write_syscalls;
-    unsigned long long num_write_syscalls_wouldblock;
-    unsigned long long num_coords_outside_canvas;
 };
 
+void connection_tracker_init(struct connection_tracker *t, in_addr_t addr, unsigned long long start_time);
 void connection_tracker_print(const struct connection_tracker *t);
 
-#define CONN_BUF_SIZE 1024
+#define MAX_CONNECTIONS 1024
 struct connection {
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
     struct connection_tracker tracker;
-    int recv_read_pos;
-    int recv_write_pos;
-    int send_read_pos;
-    int send_write_pos;
-    unsigned char recvbuf[CONN_BUF_SIZE];
-    unsigned char sendbuf[CONN_BUF_SIZE];
+    struct buffer recvbuf;
+    struct buffer sendbuf;
 };
 
-void connection_init(struct connection *c, int connfd, struct sockaddr_in connaddr, int id);
-void connection_close(struct connection *conn);
+void connection_print(const struct connection *c);
+void connection_init(struct connection *c, int connfd, struct sockaddr_in connaddr);
+void connection_close(struct connection *c);
 
-#define COMMAND_NONE 0 // only used by connection_recv_from_buffer
-#define COMMAND_FAULTY 1
-#define COMMAND_PRINT 2
-#define COMMAND_GET 3
-#define COMMAND_WOULDBLOCK 4 // only used by connection_recv
-#define COMMAND_CONNECTION_END 5 // only used by connection_recv
-int connection_recv_from_buffer(struct connection *conn, struct pixel *px);
-int connection_recv(struct connection *conn, struct pixel *px);
-
-void connection_print(const struct connection *conn, int id);
+#define COMMAND_NONE 0
+#define COMMAND_PRINT 1
+#define COMMAND_GET 2
+#define COMMAND_FAULTY 3
+#define COMMAND_WOULDBLOCK 4
+#define COMMAND_CONNECTION_END 5
+#define COMMAND_SYS_ERROR 6
+int connection_recv_from_buffer(struct connection *c, struct pixel *px);
+/* returns PRINT/GET/FAULTY/WOULDBLOCK/CONNECTION_END/SYS_ERROR */
+int connection_recv(struct connection *c, struct pixel *px);
 
 #endif

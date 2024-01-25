@@ -73,6 +73,8 @@ static void *net_thread_main(void *arg) {
         // every connection is allowed one read() and one write() syscall per loop iteration.
         // write() is only issued if we need to read bytes for the next command.
         // read() is only issued if there are bytes to be sent to the client.
+        //
+        // TODO instead of servicing one command, just service whatever's in the buffer?
         struct pixel px;
         for (size_t i = 0; i < num_conns; i++) {
             struct connection *c = &conns[i];
@@ -84,11 +86,15 @@ static void *net_thread_main(void *arg) {
             // here, this means that the sendbuf must have enough space for a GET command response.
             if (buffer_write_space(&c->sendbuf) < 4) { // NOTE: this should be the correct value, because the buffer should
                                                        // be moved to front here. TODO check
-                continue;
+                goto do_send;
+            }
+            // this also means that the multisend must be empty
+            if (!rect_iter_done(&c->multisend)) {
+                goto do_send;
             }
 
             int status = connection_recv(c, &px);
-            if (status == COMMAND_MULTIRECV || status == COMMAND_PRINT) {
+            if (status == COMMAND_MULTIRECV_NEXT || status == COMMAND_PRINT) {
                 canvas_set_px(&px);
             } else if (status == COMMAND_GET) {
                 int inside_canvas = canvas_get_px(&px);
@@ -102,6 +108,9 @@ static void *net_thread_main(void *arg) {
                 p[1] = px.g;
                 p[2] = px.b;
                 p[3] = inside_canvas;
+            } else if (status == COMMAND_MULTIRECV || status == COMMAND_MULTISEND) {
+                // multirecv: do nothing. reading pixels starts in next loop iteration.
+                // multisend: do nothing. sending pixels starts at do_send.
             } else if (status == COMMAND_FAULTY || status == COMMAND_WOULDBLOCK) {
                 // do nothing
             } else if (status == COMMAND_CONNECTION_END) {
@@ -117,6 +126,19 @@ static void *net_thread_main(void *arg) {
                 exit(1);
             }
 
+do_send:
+            // fill from multisend, if remaining
+            unsigned char *p;
+            while (!rect_iter_done(&c->multisend) && (p = buffer_write_reserve(&c->sendbuf, 4)) != NULL) {
+                px.x = c->multisend.x;
+                px.y = c->multisend.y;
+                rect_iter_advance(&c->multisend);
+                int inside_canvas = canvas_get_px(&px);
+                p[0] = px.r;
+                p[1] = px.g;
+                p[2] = px.b;
+                p[3] = inside_canvas;
+            }
             // try writing the sendbuffer (nonblock)
             // this only happens if the connection is not closed yet
             if (buffer_size(&c->sendbuf) > 0) {

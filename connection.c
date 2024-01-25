@@ -70,6 +70,7 @@ void connection_init(struct connection *c, int connfd, struct sockaddr_in connad
     c->addr = connaddr;
     connection_tracker_init(&c->tracker, connaddr.sin_addr.s_addr, SDL_GetTicks64());
     rect_iter_init(&c->multirecv);
+    rect_iter_init(&c->multisend);
     buffer_init_malloc(&c->recvbuf);
     buffer_init_malloc(&c->sendbuf);
 }
@@ -96,7 +97,7 @@ int connection_recv_from_multi(struct connection *c, struct pixel *px) {
         px->g = p[1];
         px->b = p[2];
         rect_iter_advance(&c->multirecv);
-        return COMMAND_MULTIRECV;
+        return COMMAND_MULTIRECV_NEXT;
     } else {
         return COMMAND_MULTIRECV_DONE;
     }
@@ -137,13 +138,22 @@ int connection_recv_from_buffer(struct connection *c, struct pixel *px) {
         int h = p[6] | ((p[7] & 0xf0) << 4);
         r->xstop = r->xstart + w;
         r->ystop = r->ystart + h;
+        return COMMAND_MULTIRECV;
+    } else if (p[0] == 'g') {
+        struct rect_iter *r = &c->multisend;
         if (!rect_iter_done(r)) {
-            return connection_recv_from_multi(c, px);
-        } else {
-            // this happens if w == 0 or h == 0, so we don't need to receive any pixels
-            return COMMAND_FAULTY; // it's not a fault based on the protocol, but we use it here
-                                   // to simply skip the client action
+            printf("ERROR: multisend not empty although it should be\n");
+            exit(1); // TODO
         }
+        r->xstart = p[1] | (p[2] << 8);
+        r->x = r->xstart;
+        r->ystart = p[3] | (p[4] << 8);
+        r->y = r->ystart;
+        int w = p[5] | ((p[7] & 0x0f) << 8);
+        int h = p[6] | ((p[7] & 0xf0) << 4);
+        r->xstop = r->xstart + w;
+        r->ystop = r->ystart + h;
+        return COMMAND_MULTISEND;
     } else {
         return COMMAND_FAULTY;
     }

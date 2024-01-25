@@ -16,28 +16,20 @@
 
 #define PORT 1337
 
-#define MAX_CONNS 10
+// conns[0..num_conns] contains the active connections.
+// if one connection in the middle is removed, conns[num_conns - 1] is moved in its spot.
+// this is like rust's Vec::swap_remove.
+// when iterating over the connections, we need to make sure that the one that got swapped is not skipped.
+#define MAX_CONNS 1024
 struct connection conns[MAX_CONNS];
+size_t num_conns = 0;
 pthread_t net_thread;
 volatile int should_quit = 0;
 
-static void *net_thread_main(void *arg) {
-    int sockfd = (int)(intptr_t)arg;
-
-    while (!should_quit) {
-        int free = -1;
-        for (int i = 0; i < MAX_CONNS; i++) {
-            if (conns[i].fd == -1) {
-                free = i;
-                break;
-            }
-        }
-        if (free == -1) {
-            printf("no free slot\n");
-            exit(1); // TODO
-        }
-        struct connection *c = &conns[free];
-
+static void handle_new_connection(int sockfd) {
+    if (num_conns == MAX_CONNS) {
+        printf("WARNING: all connections occupied!\n"); // TODO
+    } else {
         int connfd;
         struct sockaddr_in connaddr;
         socklen_t connlen = sizeof(connaddr);
@@ -46,94 +38,105 @@ static void *net_thread_main(void *arg) {
             perror("accept");
             exit(1); // TODO
         } else if (connfd != -1) { // we found a new connection (no error and no wouldblock)
-            connection_init(c, connfd, connaddr, free);
-        }
+            struct connection *c = &conns[num_conns];
+            connection_init(c, connfd, connaddr);
+            num_conns += 1;
 
-        // move through all connections
+            printf("accept ");
+            connection_print(c);
+        }
+    }
+}
+
+static void close_and_swap(struct connection *c, const char *msg_prefix) {
+    printf("%s ", msg_prefix);
+    connection_print(c);
+
+    connection_close(c);
+
+    // move highest connection to this spot (no inactive connections between the active ones)
+    struct connection *last = &conns[num_conns - 1];
+    if (c != last) {
+        memcpy(c, last, sizeof(*c));
+    }
+    num_conns -= 1;
+}
+
+static void *net_thread_main(void *arg) {
+    int sockfd = (int)(intptr_t)arg;
+
+    while (!should_quit) {
+        handle_new_connection(sockfd);
+
+        // move through all connections.
+        // in each iteration, exactly one command of each connection is serviced.
+        // every connection is allowed one read() and one write() syscall per loop iteration.
+        // write() is only issued if we need to read bytes for the next command.
+        // read() is only issued if there are bytes to be sent to the client.
         struct pixel px;
-        for (int i = 0; i < MAX_CONNS; i++) {
-            c = &conns[i];
-            if (c->fd == -1)
-                continue;
-            // we only read a new command from the client if we can incorporate it.
-            // case 1: sendbuffer is full -> we can't incorporate another GET
-            if (buffer_size(&c->sendbuf) > CONN_BUF_SIZE - 4) {
-               goto do_send;
+        for (size_t i = 0; i < num_conns; i++) {
+            struct connection *c = &conns[i];
+            if (c->fd == -1) {
+                printf("connection not used?\n");
+                exit(1); // TODO
             }
-            // case 2: multisend is not done -> we can't incorporate another multisend
-            if (!rect_iter_done(&c->multisend)) {
-                goto do_send;
+            // the server only handles new commands from a client if every possible command can be serviced without waiting.
+            // here, this means that the sendbuf must have enough space for a GET command response.
+            if (buffer_write_space(&c->sendbuf) < 4) { // NOTE: this should be the correct value, because the buffer should
+                                                       // be moved to front here. TODO check
+                continue;
             }
 
             int status = connection_recv(c, &px);
-            if (status == COMMAND_FAULTY) {
-                // do nothing
-            } else if (status == COMMAND_PRINT || status == COMMAND_MULTIRECV) {
+            if (status == COMMAND_MULTIRECV || status == COMMAND_PRINT) {
                 canvas_set_px(&px);
             } else if (status == COMMAND_GET) {
                 int inside_canvas = canvas_get_px(&px);
                 // put pixel data in sendbuffer. We already know we have enough space.
-                // If coordinates are outside range, send (0,0,0)
-                // we can't send nothing because the client expects pixel data,
-                // and it might be easier to avoid edge conditions
-                // TODO perhaps a flag if it was inside or outside range, but then
-                // 4 bytes won't be enough anymore
-                unsigned char *sp = buffer_write_reserve(&c->sendbuf, 4);
-                if (sp == NULL) {
-                    printf("wtf\n");
+                unsigned char *p = buffer_write_reserve(&c->sendbuf, 4);
+                if (p == NULL) {
+                    printf("not enough space in sendbuf?\n");
                     exit(1);
                 }
-                sp[0] = px.r;
-                sp[1] = px.g;
-                sp[2] = px.b;
-                sp[3] = inside_canvas;
-            } else if (status == COMMAND_MULTISEND) {
-                goto do_send;
-            } else if (status == COMMAND_WOULDBLOCK) {
+                p[0] = px.r;
+                p[1] = px.g;
+                p[2] = px.b;
+                p[3] = inside_canvas;
+            } else if (status == COMMAND_FAULTY || status == COMMAND_WOULDBLOCK) {
                 // do nothing
             } else if (status == COMMAND_CONNECTION_END) {
-                printf("close ");
-                connection_print(c, i);
-
-                connection_close(c);
+                close_and_swap(c, "close");
+                i -= 1; // connection at this index is now another one
+                continue;
+            } else if (status == COMMAND_SYS_ERROR) {
+                close_and_swap(c, "read() syscall error in");
+                i -= 1; // connection at this index is now another one
                 continue;
             } else {
                 printf("wtf");
                 exit(1);
             }
 
-do_send:
-            buffer_move_front(&c->sendbuf);
-            unsigned char *sp;
-            while (!rect_iter_done(&c->multisend)
-                    && (sp = buffer_write_reserve(&c->sendbuf, 4)) != NULL)
-            {
-                px.x = c->multisend.x;
-                px.y = c->multisend.y;
-                rect_iter_advance(&c->multisend);
-                int inside_canvas = canvas_get_px(&px);
-                sp[0] = px.r;
-                sp[1] = px.g;
-                sp[2] = px.b;
-                sp[3] = inside_canvas;
-            }
-
             // try writing the sendbuffer (nonblock)
             // this only happens if the connection is not closed yet
             if (buffer_size(&c->sendbuf) > 0) {
-                status = buffer_send_nonblocking(&c->sendbuf, c->fd);
+                status = buffer_write_syscall(&c->sendbuf, c->fd);
                 if (IS_REAL_ERROR(status)) {
-                    perror("write");
-                    exit(1); // TODO
+                    close_and_swap(c, "write() syscall error in");
+                    i -= 1; // connection at this index is now another one
+                    continue;
                 }
             }
         }
     }
 
     printf("closing network\n");
-    for (int i = 0; i < MAX_CONNS; i++) {
+    for (size_t i = 0; i < num_conns; i++) {
         if (conns[i].fd != -1) {
             connection_close(&conns[i]);
+        } else {
+            printf("connection not used?\n");
+            exit(1); // TODO
         }
     }
     close(sockfd);
@@ -141,14 +144,19 @@ do_send:
 }
 
 void net_start(void) {
-    for (int i = 0; i < MAX_CONNS; i++) {
-        conns[i].fd = -1;
-    }
-
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("socket");
-        exit(0);
+        exit(1);
+    }
+
+    /* make the address immediatly reusable after the listening socket will have
+     * been closed */
+    int should_reuse_address = 1;
+    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &should_reuse_address,
+        sizeof(should_reuse_address))) {
+        perror("setsockopt");
+        exit(1);
     }
 
     struct sockaddr_in servaddr = {0};

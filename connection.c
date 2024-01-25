@@ -12,14 +12,6 @@
 #include "common.h"
 #include "connection.h"
 
-void connection_tracker_print(const struct connection_tracker *t) {
-    printf("Tracker {\n");
-    printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
-    printf("  start_time: %lld,\n", t->start_time);
-    printf("  end_time: %lld,\n", t->end_time);
-    printf("}\n");
-}
-
 void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) {
@@ -32,24 +24,23 @@ void set_nonblocking(int fd) {
     }
 }
 
-void connection_init(struct connection *c, int connfd, struct sockaddr_in connaddr, int id) {
-    set_nonblocking(connfd);
-    memset(c, 0, sizeof(*c)); // TODO not the buffers?
-    c->fd = connfd;
-    c->addr = connaddr;
-    c->tracker.start_time = SDL_GetTicks64(); // TODO use OS functionalityy
-    c->tracker.addr = connaddr.sin_addr.s_addr;
-
-    printf("accepted ");
-    connection_print(c, id);
+void connection_tracker_init(struct connection_tracker *t, in_addr_t addr, unsigned long long start_time) {
+    memset(t, 0, sizeof(*t));
+    t->addr = addr;
+    t->start_time = start_time;
 }
 
-void connection_close(struct connection *c) {
-    c->tracker.end_time = SDL_GetTicks64(); // TODO use OS functionality
-    connection_tracker_print(&c->tracker);
+void connection_tracker_print(const struct connection_tracker *t) {
+    printf("Tracker {\n");
+    printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
+    printf("  start_time: %lld,\n", t->start_time);
+    printf("  end_time: %lld,\n", t->end_time);
+    printf("}\n");
 
-    close(c->fd);
-    c->fd = -1;
+}
+
+void rect_iter_init(struct rect_iter *r) {
+    memset(r, 0, sizeof(*r));
 }
 
 int rect_iter_done(const struct rect_iter *r) {
@@ -57,8 +48,10 @@ int rect_iter_done(const struct rect_iter *r) {
 }
 
 void rect_iter_advance(struct rect_iter *r) {
-    if (rect_iter_done(r))
+    if (rect_iter_done(r)) {
+        printf("WARNING: rect_iter_advance called on finished iter\n");
         return; // TODO panic?
+    }
     r->x += 1;
     if (r->x == r->xstop) {
         r->x = r->xstart;
@@ -66,190 +59,119 @@ void rect_iter_advance(struct rect_iter *r) {
     }
 }
 
-unsigned long long buffer_size(const struct buffer *b) {
-    return b->write_pos - b->read_pos;
+void connection_print(const struct connection *c) {
+    in_addr_t a = c->addr.sin_addr.s_addr;
+    printf("Connection { ip: %d.%d.%d.%d }\n", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, (a >> 24) & 0xff);
 }
 
-const unsigned char *buffer_read_reserve(struct buffer *b, unsigned long long n) {
-    const unsigned char *p = NULL;
-    if (buffer_size(b) >= n) {
-        p = &b->data[b->read_pos];
-        b->read_pos += n;
-    }
-    return p;
+void connection_init(struct connection *c, int connfd, struct sockaddr_in connaddr) {
+    set_nonblocking(connfd);
+    c->fd = connfd;
+    c->addr = connaddr;
+    connection_tracker_init(&c->tracker, connaddr.sin_addr.s_addr, SDL_GetTicks64());
+    rect_iter_init(&c->multirecv);
+    buffer_init_malloc(&c->recvbuf);
+    buffer_init_malloc(&c->sendbuf);
 }
 
-unsigned char *buffer_write_reserve(struct buffer *b, unsigned long long n) {
-    unsigned char *p = NULL;
-    if (CONN_BUF_SIZE - b->write_pos >= n) {
-        p = &b->data[b->write_pos];
-        b->write_pos += n;
-    }
-    return p;
+void connection_close(struct connection *c) {
+    buffer_destroy_malloc(&c->recvbuf);
+    buffer_destroy_malloc(&c->sendbuf);
+    c->tracker.end_time = SDL_GetTicks64(); // TODO use OS functionality
+    connection_tracker_print(&c->tracker);
+
+    close(c->fd);
+    c->fd = -1;
 }
 
-void buffer_move_front(struct buffer *b) {
-    int bufsize = b->write_pos - b->read_pos;
-    if (b->read_pos > 0) {
-        memmove(b->data, &b->data[b->read_pos], bufsize);
-        b->read_pos = 0;
-        b->write_pos = bufsize;
-    }
-}
-
-int buffer_recv_nonblocking(struct buffer *b, int fd) {
-    buffer_move_front(b);
-    if (b->write_pos == CONN_BUF_SIZE) {
-        printf("don't call recv on full buffer\n");
-        return -1; // TODO
-    }
-    int status = read(fd, &b->data[b->write_pos], CONN_BUF_SIZE - b->write_pos);
-    if (status > 0) {
-        b->write_pos += status;
-    }
-    return status;
-}
-
-int buffer_send_nonblocking(struct buffer *b, int fd) {
-    int bufsize = buffer_size(b);
-    if (bufsize == 0) {
-        printf("don_t call send on empty buffer\n");
-        return -1; // TODO
-    }
-    int status = write(fd, &b->data[b->read_pos], bufsize);
-    if (status > 0) {
-        b->read_pos += status;
-    }
-    return status;
-}
-
-int connection_recv_from_multi(struct connection *conn, struct pixel *px) {
-    const unsigned char *rb:
-    if (!rect_iter_done(&conn->multirecv)) {
-        const unsigned char *rp = buffer_read_reserve(&conn->recvbuf, 4);
-        if (rb == NULL)
+int connection_recv_from_multi(struct connection *c, struct pixel *px) {
+    if (!rect_iter_done(&c->multirecv)) {
+        const unsigned char *p = buffer_read_reserve(&c->recvbuf, 4);
+        if (p == NULL) {
             return COMMAND_NONE;
-        px->x = conn->multirecv.x;
-        px->y = conn->multirecv.y;
-        px->r = rp[0];
-        px->g = rp[1];
-        px->b = rp[2];
-        rect_iter_advance(&conn->multirecv);
+        }
+        px->x = c->multirecv.x;
+        px->y = c->multirecv.y;
+        px->r = p[0];
+        px->g = p[1];
+        px->b = p[2];
+        rect_iter_advance(&c->multirecv);
         return COMMAND_MULTIRECV;
     } else {
         return COMMAND_MULTIRECV_DONE;
     }
 }
-/*
- * 'p' / 'g'
- * x (lo)
- * x (hi)
- * y (lo)
- * y (hi)
- * w [0..=7]
- * h [0..=7]
- * high to low: h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]
- */
 
-int connection_recv_from_buffer(struct connection *conn, struct pixel *px) {
-    int status = connection_recv_from_multi(conn, px);
+int connection_recv_from_buffer(struct connection *c, struct pixel *px) {
+    int status = connection_recv_from_multi(c, px);
     if (status != COMMAND_MULTIRECV_DONE)
         return status;
 
     // we need to read the next 'real' command
-    const unsigned char *rp = buffer_read_reserve(&conn->recvbuf, 8);
-    if (rp == NULL)
+    const unsigned char *p = buffer_read_reserve(&c->recvbuf, 8);
+    if (p == NULL) {
         return COMMAND_NONE;
-    if (rp[0] == 'P') {
-        px->x = rp[1] | (rp[2] << 8);
-        px->y = rp[3] | (rp[4] << 8);
-        px->r = rp[5];
-        px->g = rp[6];
-        px->b = rp[7];
+    }
+    if (p[0] == 'P') {
+        px->x = p[1] | (p[2] << 8);
+        px->y = p[3] | (p[4] << 8);
+        px->r = p[5];
+        px->g = p[6];
+        px->b = p[7];
         return COMMAND_PRINT;
-    } else if (rp[0] == 'G') {
-        px->x = rp[1] | (rp[2] << 8);
-        px->y = rp[3] | (rp[4] << 8);
+    } else if (p[0] == 'G') {
+        px->x = p[1] | (p[2] << 8);
+        px->y = p[3] | (p[4] << 8);
         return COMMAND_GET;
-    } else if (rp[0] == 'p') {
-        struct rect_iter *r = &conn->multirecv;
+    } else if (p[0] == 'p') {
+        struct rect_iter *r = &c->multirecv;
         if (!rect_iter_done(r)) {
-            printf("ERROR: multirecv not empty\n");
-            exit(1) // TODO
+            printf("ERROR: multirecv not empty although it should be\n");
+            exit(1); // TODO
         }
-        r->xstart = rp[1] | (rp[2] << 8);
+        r->xstart = p[1] | (p[2] << 8);
         r->x = r->xstart;
-        r->ystart = rp[3] | (rp[4] << 8);
+        r->ystart = p[3] | (p[4] << 8);
         r->y = r->ystart;
-        int w = rp[5] | ((rp[7] & 0x0f) << 8);
-        int h = rp[6] | ((rp[7] & 0xf0) << 4);
-        if (w == 0 || h == 0) {
-            r->xstop = r->xstart;
-            r->ystop = r->ystart;
-            return COMMAND_FAULTY; // it's not a fault based on the spec, but this is fine here
-                                   // (since we just ignore it)
-        }
+        int w = p[5] | ((p[7] & 0x0f) << 8);
+        int h = p[6] | ((p[7] & 0xf0) << 4);
         r->xstop = r->xstart + w;
         r->ystop = r->ystart + h;
-        return connection_recv_from_multi(conn, px); // TODO assert that this is not COMMAND_MULTIRECV_DONE
-                                                  // TODO do we want this here immediately? or really only read <=8 bytes per call?
-    } else if (rp[0] == 'g') {
-        struct rect_iter *r = &conn->multisend;
         if (!rect_iter_done(r)) {
-            printf("ERROR: multisend not empty\n");
-            exit(1) // TODO
+            return connection_recv_from_multi(c, px);
+        } else {
+            // this happens if w == 0 or h == 0, so we don't need to receive any pixels
+            return COMMAND_FAULTY; // it's not a fault based on the protocol, but we use it here
+                                   // to simply skip the client action
         }
-        r->xstart = rp[1] | (rp[2] << 8);
-        r->x = r->xstart;
-        r->ystart = rp[3] | (rp[4] << 8);
-        r->y = r->ystart;
-        int w = rp[5] | ((rp[7] & 0x0f) << 8);
-        int h = rp[6] | ((rp[7] & 0xf0) << 4);
-        if (w == 0 || h == 0) {
-            r->xstop = r->xstart;
-            r->ystop = r->ystart;
-            return COMMAND_FAULTY; // it's not a fault based on the spec, but this is fine here
-                                   // (since we just ignore it)
-        }
-        r->xstop = r->xstart + w;
-        r->ystop = r->ystart + h;
-        return COMMAND_MULTISEND;
     } else {
         return COMMAND_FAULTY;
     }
 }
 
-int connection_recv(struct connection *conn, struct pixel *px) {
-    int status = connection_recv_from_buffer(conn, px); // fast path - we already read enough
-    if (status != COMMAND_NONE)
-        return status; // on faulty command, client is skipped (does nothing).
+int connection_recv(struct connection *c, struct pixel *px) {
+    int status = connection_recv_from_buffer(c, px); // fast path - we already read enough
+    if (status != COMMAND_NONE) {
+        return status;
+    }
 
-    status = buffer_recv_nonblocking(&conn->recvbuf, conn->fd);
+    // we don't have enough bytes. try to get more from socket
+    status = buffer_read_syscall(&c->recvbuf, c->fd);
     if (WOULD_BLOCK(status)) {
         return COMMAND_WOULDBLOCK;
     } else if (status == -1) {
-        perror("read");
-        exit(1); // TODO
+        return COMMAND_SYS_ERROR;
     } else if (status == 0) {
         return COMMAND_CONNECTION_END;
     } else {
-        status = connection_recv_from_buffer(conn, px);
+        // try again
+        status = connection_recv_from_buffer(c, px);
         if (status != COMMAND_NONE) {
             return status;
         } else {
-            // we still don't have enough bytes. just interpret this as wouldblock.
-            // don't increase num_read_syscalls_wouldblock here
+            // we still don't have enough bytes. just interpret this as wouldblock
+            // NOTE for later: don't increase num_read_syscalls_wouldblock here
             return COMMAND_WOULDBLOCK;
         }
     }
 }
-
-void connection_print(const struct connection *conn, int id) {
-    in_addr_t a = conn->addr.sin_addr.s_addr;
-    printf("Connection { ip: %d.%d.%d.%d", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, (a >> 24) & 0xff);
-    if (id != -1)
-        printf(", id: %d }\n", id);
-    else
-        printf(" }\n");
-}
-

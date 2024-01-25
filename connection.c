@@ -48,12 +48,9 @@ void connection_init(struct connection *c, int connfd, struct sockaddr_in connad
     set_nonblocking(connfd);
     c->fd = connfd;
     c->addr = connaddr;
-    connection_tracker_init(&c->tracker, SDL_GetTicks64(), connaddr.sin_addr.s_addr);
+    connection_tracker_init(&c->tracker, connaddr.sin_addr.s_addr, SDL_GetTicks64());
     buffer_init_malloc(&c->recvbuf);
     buffer_init_malloc(&c->sendbuf);
-
-    printf("accepted ");
-    connection_print(c);
 }
 
 void connection_close(struct connection *c) {

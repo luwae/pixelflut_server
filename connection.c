@@ -33,10 +33,10 @@ void connection_tracker_init(struct connection_tracker *t, in_addr_t addr, unsig
 void connection_tracker_print(const struct connection_tracker *t) {
     printf("Tracker {\n");
     printf("  ip: %d.%d.%d.%d,\n", t->addr & 0xff, (t->addr >> 8) & 0xff, (t->addr >> 16) & 0xff, (t->addr >> 24) & 0xff);
+    printf("  pixels_set: %d,\n", t->pixels_set);
     printf("  start_time: %lld,\n", t->start_time);
     printf("  end_time: %lld,\n", t->end_time);
     printf("}\n");
-
 }
 
 void rect_iter_init(struct rect_iter *r) {

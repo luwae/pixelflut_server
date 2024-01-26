@@ -20,7 +20,6 @@
 // if one connection in the middle is removed, conns[num_conns - 1] is moved in its spot.
 // this is like rust's Vec::swap_remove.
 // when iterating over the connections, we need to make sure that the one that got swapped is not skipped.
-#define MAX_CONNS 1024
 struct connection conns[MAX_CONNS];
 size_t num_conns = 0;
 pthread_t net_thread;
@@ -95,6 +94,7 @@ static void *net_thread_main(void *arg) {
 
             int status = connection_recv(c, &px);
             if (status == COMMAND_MULTIRECV_NEXT || status == COMMAND_PRINT) {
+                c->tracker.pixels_set++;
                 canvas_set_px(&px);
             } else if (status == COMMAND_GET) {
                 int inside_canvas = canvas_get_px(&px);

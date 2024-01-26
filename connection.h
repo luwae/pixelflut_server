@@ -4,10 +4,14 @@
 #include <sys/socket.h>
 #include "buffer.h"
 
+#define MAX_CONNS 1024
+#include <netinet/in.h>
+
 void set_nonblocking(int fd);
 
 struct connection_tracker {
     in_addr_t addr;
+    unsigned int pixels_set;
     unsigned long long start_time;
     unsigned long long end_time;
 };
@@ -37,6 +41,9 @@ struct connection {
     struct buffer recvbuf;
     struct buffer sendbuf;
 };
+
+extern struct connection conns[MAX_CONNS];
+extern size_t num_conns;
 
 void connection_print(const struct connection *c);
 void connection_init(struct connection *c, int connfd, struct sockaddr_in connaddr);

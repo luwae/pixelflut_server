@@ -103,6 +103,7 @@ int connection_recv_from_multi(struct connection *c, struct pixel *px) {
     }
 }
 
+// TODO this interface is stupid. Pull some of the work from net.c here
 int connection_recv_from_buffer(struct connection *c, struct pixel *px) {
     int status = connection_recv_from_multi(c, px);
     if (status != COMMAND_MULTIRECV_DONE)
@@ -154,6 +155,8 @@ int connection_recv_from_buffer(struct connection *c, struct pixel *px) {
         r->xstop = r->xstart + w;
         r->ystop = r->ystart + h;
         return COMMAND_MULTISEND;
+    } else if (p[0] == 'I') {
+        return COMMAND_INFO;
     } else {
         return COMMAND_FAULTY;
     }

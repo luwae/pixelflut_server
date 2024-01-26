@@ -49,15 +49,16 @@ void connection_close(struct connection *c);
 #define COMMAND_GET 4
 #define COMMAND_MULTIRECV 5
 #define COMMAND_MULTISEND 6
-#define COMMAND_FAULTY 7
-#define COMMAND_WOULDBLOCK 8
-#define COMMAND_CONNECTION_END 9
-#define COMMAND_SYS_ERROR 10
+#define COMMAND_INFO 7
+#define COMMAND_FAULTY 8
+#define COMMAND_WOULDBLOCK 9
+#define COMMAND_CONNECTION_END 10
+#define COMMAND_SYS_ERROR 11
 /* returns NONE/MULTIRECV_NEXT/MULTIRECV_DONE */
 int connection_recv_from_multi(struct connection *c, struct pixel *px);
-/* returns NONE/MULTIRECV_NEXT/PRINT/GET/MULTIRECV/MULTISEND/FAULTY */
+/* returns NONE/MULTIRECV_NEXT/PRINT/GET/MULTIRECV/MULTISEND/INFO/FAULTY */
 int connection_recv_from_buffer(struct connection *c, struct pixel *px);
-/* returns MULTIRECV_NEXT/PRINT/GET/MULTIRECV/MULTISEND/FAULTY/WOULDBLOCK/CONNECTION_END/SYS_ERROR */
+/* returns MULTIRECV_NEXT/PRINT/GET/MULTIRECV/MULTISEND/INFO/FAULTY/WOULDBLOCK/CONNECTION_END/SYS_ERROR */
 int connection_recv(struct connection *c, struct pixel *px);
 
 #endif

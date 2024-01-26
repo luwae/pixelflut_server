@@ -90,6 +90,14 @@ int canvas_get_px(struct pixel *px) {
     return 1;
 }
 
+unsigned int canvas_get_width() {
+    return TEX_SIZE_X;
+}
+
+unsigned int canvas_get_height() {
+    return TEX_SIZE_Y;
+}
+
 int canvas_should_quit(void) {
     SDL_Event e;
 

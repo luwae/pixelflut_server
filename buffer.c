@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "param.h"
 #include "buffer.h"
 
 void buffer_init_malloc(struct buffer *b) {

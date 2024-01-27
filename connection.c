@@ -11,6 +11,7 @@
 
 #include "param.h"
 #include "common.h"
+#include "canvas.h"
 #include "connection.h"
 
 void set_nonblocking(int fd) {
@@ -88,7 +89,7 @@ void connection_close(struct connection *c) {
 
 static int connection_send(struct connection *c) {
     if (buffer_size(&c->sendbuf) > 0) {
-        status = buffer_write_syscall(&c->sendbuf, c->fd);
+        int status = buffer_write_syscall(&c->sendbuf, c->fd);
         if (IS_REAL_ERROR(status)) {
             return CONNECTION_ERR;
         }
@@ -122,21 +123,21 @@ int connection_step(struct connection *c) {
             rp = buffer_read_reserve(&c->recvbuf, 4);
             if (rp == NULL && !have_read) {
                 have_read = 1;
-                status = buffer_read_syscall(&c->recvbuf);
+                status = buffer_read_syscall(&c->recvbuf, c->fd);
                 if (IS_REAL_ERROR(status)) {
                     return CONNECTION_ERR;
                 } else if (status == 0) {
                     return CONNECTION_END;
-                } else if (status > 0)
+                } else if (status > 0) {
                     rp = buffer_read_reserve(&c->recvbuf, 4);
                 }
             }
             if (rp != NULL) {
                 px.x = c->multirecv.x;
                 px.y = c->multirecv.y;
-                px->r = rp[0];
-                px->g = rp[1];
-                px->b = rp[2];
+                px.r = rp[0];
+                px.g = rp[1];
+                px.b = rp[2];
                 rect_iter_advance(&c->multirecv);
                 canvas_set_px(&px);
             }
@@ -148,12 +149,12 @@ int connection_step(struct connection *c) {
         rp = buffer_read_peek(&c->recvbuf, 8);
         if (rp == NULL && !have_read) {
             have_read = 1;
-            status = buffer_read_syscall(&c->recvbuf);
+            status = buffer_read_syscall(&c->recvbuf, c->fd);
             if (IS_REAL_ERROR(status)) {
                 return CONNECTION_ERR;
             } else if (status == 0) {
                 return CONNECTION_END;
-            } else if (status > 0)
+            } else if (status > 0) {
                 rp = buffer_read_peek(&c->recvbuf, 8);
             }
         }

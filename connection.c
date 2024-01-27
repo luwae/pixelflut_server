@@ -84,7 +84,7 @@ void connection_close(struct connection *c) {
     connection_tracker_print(&c->tracker);
 
     close(c->fd);
-    c->fd = -1;
+    c->fd = -1; // extra security
 }
 
 static int connection_send(struct connection *c) {
@@ -97,14 +97,26 @@ static int connection_send(struct connection *c) {
     return CONNECTION_OK;
 }
 
-// the read() may happen any time.
-// the write() happens right at the end (see return pattern)
+/* In each iteration, the client is allowed
+ * - up to 1 read() syscall. To maximize efficiency, it always happens as late as possible (and only if needed).
+ * - up to 1 write() syscall. This happens at the end. The send buffer should be filled as much as possible.
+ * - up to 1 drawn pixel.
+ */
+
+#define DRAW_LIMIT 1
+#define READ_LIMIT 1
+
+// TODO perhaps a byte-stream oriented buffer interface? Probably less efficient, though.
 int connection_step(struct connection *c) {
     unsigned char *wp;
     const unsigned char *rp;
     struct pixel px;
     int have_read = 0;
+    int have_drawn = 0;
+    int multisend_done; // this is extra protection against another command trying to pack its response in the middle of a multisend sequence
+                        // doesn't happen as long as we don't have responses < 4 bytes.
     int status;
+    // while loop here because we might go through several multirecvs/multisends in one connection_step
     while (1) {
         // 1. handle multi send as far as possible
         while (!rect_iter_done(&c->multisend) && (wp = buffer_write_reserve(&c->sendbuf, 4)) != NULL) {
@@ -118,11 +130,11 @@ int connection_step(struct connection *c) {
             wp[3] = inside_canvas;
         }
 
-        // 2. handle multi recv
-        if (!rect_iter_done(&c->multirecv)) {
+        // 2. handle multi recv as far as possible
+        while (!rect_iter_done(&c->multirecv) && have_drawn < DRAW_LIMIT) {
             rp = buffer_read_reserve(&c->recvbuf, 4);
-            if (rp == NULL && !have_read) {
-                have_read = 1;
+            if (rp == NULL && have_read < READ_LIMIT) {
+                have_read += 1;
                 status = buffer_read_syscall(&c->recvbuf, c->fd);
                 if (IS_REAL_ERROR(status)) {
                     return CONNECTION_ERR;
@@ -132,23 +144,30 @@ int connection_step(struct connection *c) {
                     rp = buffer_read_reserve(&c->recvbuf, 4);
                 }
             }
-            if (rp != NULL) {
-                px.x = c->multirecv.x;
-                px.y = c->multirecv.y;
-                px.r = rp[0];
-                px.g = rp[1];
-                px.b = rp[2];
-                rect_iter_advance(&c->multirecv);
-                canvas_set_px(&px);
+            if (rp == NULL) {
+                return connection_send(c);
             }
-            return connection_send(c); // we either drew a pixel or can't read it. return in either case.
+            px.x = c->multirecv.x;
+            px.y = c->multirecv.y;
+            px.r = rp[0];
+            px.g = rp[1];
+            px.b = rp[2];
+            rect_iter_advance(&c->multirecv);
+            canvas_set_px(&px);
+            have_drawn += 1;
+        }
+        if (!rect_iter_done(&c->multirecv)) {
+            return connection_send(c);
         }
 
         // 3. get actual command
+        // Invariants holding here:
+        //  - multisend is either empty or the sendbuffer is full
+        //  - multirecv is empty -> we can read an actual command
         // peek here instead of reserve, because we can't be sure that we are able to process the command
         rp = buffer_read_peek(&c->recvbuf, 8);
-        if (rp == NULL && !have_read) {
-            have_read = 1;
+        if (rp == NULL && have_read < READ_LIMIT) {
+            have_read += 1;
             status = buffer_read_syscall(&c->recvbuf, c->fd);
             if (IS_REAL_ERROR(status)) {
                 return CONNECTION_ERR;
@@ -158,15 +177,13 @@ int connection_step(struct connection *c) {
                 rp = buffer_read_peek(&c->recvbuf, 8);
             }
         }
-        // we have tried our very best to read a new command.
         if (rp == NULL) {
             return connection_send(c);
         }
 
+        multisend_done = rect_iter_done(&c->multisend);
         if (rp[0] == 'I') {
-            wp = buffer_write_reserve(&c->sendbuf, 16);
-            if (wp == NULL) {
-                // command is read again next time.
+            if (!multisend_done || (wp = buffer_write_reserve(&c->sendbuf, 16)) == NULL) {
                 return connection_send(c);
             }
             wp[0] = TEX_SIZE_X & 0xff;
@@ -188,6 +205,9 @@ int connection_step(struct connection *c) {
             // ADVANCE
             buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
         } else if (rp[0] == 'P') {
+            if (have_drawn == DRAW_LIMIT) {
+                return connection_send(c);
+            }
             px.x = rp[1] | (rp[2] << 8);
             px.y = rp[3] | (rp[4] << 8);
             px.r = rp[5];
@@ -196,22 +216,25 @@ int connection_step(struct connection *c) {
             // ADVANCE
             buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
             canvas_set_px(&px);
-            return connection_send(c); // pixel has been placed. return.
+            have_drawn += 1;
         } else if (rp[0] == 'G') {
-            wp = buffer_write_reserve(&c->sendbuf, 4);
-            if (wp == NULL) {
-                // command is read again next time.
+            if (!multisend_done || (wp = buffer_write_reserve(&c->sendbuf, 4)) == NULL) {
                 return connection_send(c);
             }
             px.x = rp[1] | (rp[2] << 8);
             px.y = rp[3] | (rp[4] << 8);
+            int inside_canvas = canvas_get_px(&px);
+            wp[0] = px.r;
+            wp[1] = px.g;
+            wp[2] = px.b;
+            wp[3] = inside_canvas;
             // ADVANCE
             buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
         } else if (rp[0] == 'p') {
             struct rect_iter *r = &c->multirecv;
             if (!rect_iter_done(r)) {
-                // command is read again next time.
-                return connection_send(c);
+                printf("BUG: multirecv not empty?\n");
+                return CONNECTION_ERR;
             }
             r->xstart = rp[1] | (rp[2] << 8);
             r->x = r->xstart;
@@ -226,7 +249,6 @@ int connection_step(struct connection *c) {
         } else if (rp[0] == 'g') {
             struct rect_iter *r = &c->multisend;
             if (!rect_iter_done(r)) {
-                // command is read again next time.
                 return connection_send(c);
             }
             r->xstart = rp[1] | (rp[2] << 8);

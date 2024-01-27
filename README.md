@@ -22,6 +22,8 @@ Some commands are smaller than 8 bytes, and the remaining memory is undefined. N
 
 The server may stop processing further commands from a client if its send buffer is full. The send buffer size can be discovered with the INFO command. For example, for a send buffer size of 1024 the server holds a maximum of 1024 / 4 = 256 color values. This means at most 256 GET commands may be sent to the server before the client must read from the server. Of course, this is a conservative guarantee, as more bytes are likely in-flight or stored in the TCP kernel buffer. However, a client not adhering to this is considered erroneous.
 
+It is possible for the client to request more than `SEND_BUFFER_SIZE / 4` colors in a single command, for example with RECTANGLE GET.
+
 
 
 ### Info

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "param.h"
 #include "buffer.h"
 
 void buffer_init_malloc(struct buffer *b) {
@@ -77,6 +79,14 @@ unsigned char *buffer_write_reserve(struct buffer *b, size_t size) {
     if (buffer_write_space(b) >= size) {
         p = &b->data[b->write_pos];
         b->write_pos += size;
+    }
+    return p;
+}
+
+const unsigned char *buffer_read_peek(const struct buffer *b, size_t size) {
+    const unsigned char *p = NULL;
+    if (buffer_size(b) >= size) {
+        p = &b->data[b->read_pos];
     }
     return p;
 }

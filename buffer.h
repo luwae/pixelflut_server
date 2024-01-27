@@ -1,7 +1,6 @@
 #ifndef PFS_BUFFER_H
 #define PFS_BUFFER_H
 
-#define CONN_BUF_SIZE 1024
 struct buffer {
     size_t read_pos;
     size_t write_pos;
@@ -17,5 +16,6 @@ int buffer_read_syscall(struct buffer *b, int fd);
 int buffer_write_syscall(struct buffer *b, int fd);
 const unsigned char *buffer_read_reserve(struct buffer *b, size_t size);
 unsigned char *buffer_write_reserve(struct buffer *b, size_t size);
+const unsigned char *buffer_read_peek(const struct buffer *b, size_t size);
 
 #endif

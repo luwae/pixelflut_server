@@ -5,13 +5,9 @@
 #include <pthread.h>
 #include "SDL.h"
 
+#include "param.h"
 #include "common.h"
 #include "canvas.h"
-
-#define TEX_SIZE_X 512
-#define TEX_SIZE_Y 512
-#define SCREEN_SIZE_X 1024
-#define SCREEN_SIZE_Y 1024
 
 SDL_Window *window;
 SDL_Renderer *renderer;
@@ -88,14 +84,6 @@ int canvas_get_px(struct pixel *px) {
     px->g = (pixels[index] >> 16) & 0xff;
     px->b = (pixels[index] >>  8) & 0xff;
     return 1;
-}
-
-unsigned int canvas_get_width() {
-    return TEX_SIZE_X;
-}
-
-unsigned int canvas_get_height() {
-    return TEX_SIZE_Y;
 }
 
 int canvas_should_quit(void) {

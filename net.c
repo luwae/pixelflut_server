@@ -68,110 +68,27 @@ static void *net_thread_main(void *arg) {
     while (!should_quit) {
         handle_new_connection(sockfd);
 
-        // move through all connections.
-        // in each iteration, exactly one command of each connection is serviced.
-        // every connection is allowed one read() and one write() syscall per loop iteration.
-        // write() is only issued if we need to read bytes for the next command.
-        // read() is only issued if there are bytes to be sent to the client.
-        //
-        // TODO instead of servicing one command, just service whatever's in the buffer?
-        struct pixel px;
         for (size_t i = 0; i < num_conns; i++) {
             struct connection *c = &conns[i];
             if (c->fd == -1) {
                 printf("connection not used?\n");
                 exit(1); // TODO
             }
-            // the server only handles new commands from a client if every possible command can be serviced without waiting.
-            // here, this means that the sendbuf must have enough space for a GET or INFO command response.
-            if (buffer_write_space(&c->sendbuf) < 16) { // NOTE: this should be the correct value, because the buffer should
-                                                       // be moved to front here. TODO check
-                goto do_send;
-            }
-            // this also means that the multisend must be empty
-            if (!rect_iter_done(&c->multisend)) {
-                goto do_send;
-            }
 
-            int status = connection_recv(c, &px);
-            if (status == COMMAND_MULTIRECV_NEXT || status == COMMAND_PRINT) {
-                canvas_set_px(&px);
-            } else if (status == COMMAND_GET) {
-                int inside_canvas = canvas_get_px(&px);
-                // put pixel data in sendbuffer. We already know we have enough space.
-                unsigned char *p = buffer_write_reserve(&c->sendbuf, 4);
-                if (p == NULL) {
-                    printf("not enough space in sendbuf?\n");
-                    exit(1);
-                }
-                p[0] = px.r;
-                p[1] = px.g;
-                p[2] = px.b;
-                p[3] = inside_canvas;
-            } else if (status == COMMAND_MULTIRECV || status == COMMAND_MULTISEND) {
-                // multirecv: do nothing. reading pixels starts in next loop iteration.
-                // multisend: do nothing. sending pixels starts at do_send.
-            } else if (status == COMMAND_FAULTY || status == COMMAND_WOULDBLOCK) {
-                // do nothing
-            } else if (status == COMMAND_CONNECTION_END) {
+            int status = connection_step(c);
+            if (status == CONNECTION_OK) {
+                // ok.
+            } else if (status == CONNECTION_ERR) {
+                close_and_swap(c, "error in");
+                i -= 1; // connection at this index is now another one
+                continue;
+            } else if (status == CONNECTION_END) {
                 close_and_swap(c, "close");
                 i -= 1; // connection at this index is now another one
                 continue;
-            } else if (status == COMMAND_SYS_ERROR) {
-                close_and_swap(c, "read() syscall error in");
-                i -= 1; // connection at this index is now another one
-                continue;
-            } else if (status == COMMAND_INFO) {
-                unsigned char *p = buffer_write_reserve(&c->sendbuf, 16);
-                if (p == NULL) {
-                    printf("not enough space in sendbuf?\n");
-                    exit(1);
-                }
-                unsigned int width = canvas_get_width();
-                unsigned int height = canvas_get_height();
-                p[0] = width & 0xff;
-                p[1] = (width >> 8) & 0xff;
-                p[2] = (width >> 16) & 0xff;
-                p[3] = (width >> 24) & 0xff;
-                p[4] = height & 0xff;
-                p[5] = (height >> 8) & 0xff;
-                p[6] = (height >> 16) & 0xff;
-                p[7] = (height >> 24) & 0xff;
-                p[8] = CONN_BUF_SIZE & 0xff;
-                p[9] = (CONN_BUF_SIZE >> 8) & 0xff;
-                p[10] = (CONN_BUF_SIZE >> 16) & 0xff;
-                p[11] = (CONN_BUF_SIZE >> 24) & 0xff;
-                p[12] = CONN_BUF_SIZE & 0xff;
-                p[13] = (CONN_BUF_SIZE >> 8) & 0xff;
-                p[14] = (CONN_BUF_SIZE >> 16) & 0xff;
-                p[15] = (CONN_BUF_SIZE >> 24) & 0xff;
             } else {
-                printf("wtf");
-                exit(1);
-            }
-
-do_send:
-            // fill from multisend, if remaining
-            unsigned char *p;
-            while (!rect_iter_done(&c->multisend) && (p = buffer_write_reserve(&c->sendbuf, 4)) != NULL) {
-                px.x = c->multisend.x;
-                px.y = c->multisend.y;
-                rect_iter_advance(&c->multisend);
-                int inside_canvas = canvas_get_px(&px);
-                p[0] = px.r;
-                p[1] = px.g;
-                p[2] = px.b;
-                p[3] = inside_canvas;
-            }
-            // try writing the sendbuffer (nonblock)
-            // this only happens if the connection is not closed yet
-            if (buffer_size(&c->sendbuf) > 0) {
-                status = buffer_write_syscall(&c->sendbuf, c->fd);
-                if (IS_REAL_ERROR(status)) {
-                    close_and_swap(c, "write() syscall error in");
-                    i -= 1; // connection at this index is now another one
-                    continue;
-                }
+                printf("what.\n");
+                exit(1); // TODO
             }
         }
     }

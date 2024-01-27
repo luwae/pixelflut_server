@@ -80,3 +80,11 @@ unsigned char *buffer_write_reserve(struct buffer *b, size_t size) {
     }
     return p;
 }
+
+const unsigned char *buffer_read_peek(const struct buffer *b, size_t size) {
+    const unsigned char *p = NULL;
+    if (buffer_size(b) >= size) {
+        p = &b->data[b->read_pos];
+    }
+    return p;
+}

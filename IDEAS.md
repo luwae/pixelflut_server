@@ -32,3 +32,7 @@ Make sure this does not get too general, otherwise we have to prove there are no
 There are 4 clients, and everyone gets their own quarter of the screen (no disturbance). Screen size must be reported as the new size for the clients, so they may draw accordingly. Also it should be known to the clients that it is split screen mode (they don't need to "reserve" pixels, see idea above).
 
 The split screen must be pinned to an ip, not a single connection!
+
+# Average mode
+
+On a pixel draw, pixels are not set with the new color value, but with the average of all color values that have been drawn to this coordinate.

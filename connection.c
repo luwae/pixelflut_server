@@ -87,6 +87,58 @@ void connection_close(struct connection *c) {
     c->fd = -1; // extra security
 }
 
+static void decode_rect(struct rect_iter *r, const unsigned char *rp) {
+    r->xstart = rp[1] | (rp[2] << 8);
+    r->x = r->xstart;
+    r->ystart = rp[3] | (rp[4] << 8);
+    r->y = r->ystart;
+    int w = rp[5] | ((rp[7] & 0x0f) << 8);
+    int h = rp[6] | ((rp[7] & 0xf0) << 4);
+    r->xstop = r->xstart + w;
+    r->ystop = r->ystart + h;
+}
+
+static void decode_pixel(struct pixel *px, const unsigned char *rp) {
+    px->x = rp[1] | (rp[2] << 8);
+    px->y = rp[3] | (rp[4] << 8);
+    px->r = rp[5];
+    px->g = rp[6];
+    px->b = rp[7];
+}
+
+static void decode_color(struct pixel *px, const unsigned char *rp) {
+    px->r = rp[0];
+    px->g = rp[1];
+    px->b = rp[2];
+}
+
+static void encode_info(unsigned char *wp) {
+    wp[0] = TEX_SIZE_X & 0xff;
+    wp[1] = (TEX_SIZE_X >> 8) & 0xff;
+    wp[2] = (TEX_SIZE_X >> 16) & 0xff;
+    wp[3] = (TEX_SIZE_X >> 24) & 0xff;
+    wp[4] = TEX_SIZE_Y & 0xff;
+    wp[5] = (TEX_SIZE_Y >> 8) & 0xff;
+    wp[6] = (TEX_SIZE_Y >> 16) & 0xff;
+    wp[7] = (TEX_SIZE_Y >> 24) & 0xff;
+    wp[8] = CONN_BUF_SIZE & 0xff;
+    wp[9] = (CONN_BUF_SIZE >> 8) & 0xff;
+    wp[10] = (CONN_BUF_SIZE >> 16) & 0xff;
+    wp[11] = (CONN_BUF_SIZE >> 24) & 0xff;
+    wp[12] = CONN_BUF_SIZE & 0xff;
+    wp[13] = (CONN_BUF_SIZE >> 8) & 0xff;
+    wp[14] = (CONN_BUF_SIZE >> 16) & 0xff;
+    wp[15] = (CONN_BUF_SIZE >> 24) & 0xff;
+}
+
+static void get_and_encode_color(struct pixel *px, unsigned char *wp) {
+    int inside_canvas = canvas_get_px(px);
+    wp[0] = px->r;
+    wp[1] = px->g;
+    wp[2] = px->b;
+    wp[3] = inside_canvas;
+}
+
 static int connection_send(struct connection *c) {
     if (buffer_size(&c->sendbuf) > 0) {
         int status = buffer_write_syscall(&c->sendbuf, c->fd);
@@ -123,11 +175,7 @@ int connection_step(struct connection *c) {
             px.x = c->multisend.x;
             px.y = c->multisend.y;
             rect_iter_advance(&c->multisend);
-            int inside_canvas = canvas_get_px(&px);
-            wp[0] = px.r;
-            wp[1] = px.g;
-            wp[2] = px.b;
-            wp[3] = inside_canvas;
+            get_and_encode_color(&px, wp);
         }
 
         // 2. handle multi recv as far as possible
@@ -149,9 +197,7 @@ int connection_step(struct connection *c) {
             }
             px.x = c->multirecv.x;
             px.y = c->multirecv.y;
-            px.r = rp[0];
-            px.g = rp[1];
-            px.b = rp[2];
+            decode_color(&px, rp);
             rect_iter_advance(&c->multirecv);
             canvas_set_px(&px);
             have_drawn += 1;
@@ -186,35 +232,12 @@ int connection_step(struct connection *c) {
             if (!multisend_done || (wp = buffer_write_reserve(&c->sendbuf, 16)) == NULL) {
                 return connection_send(c);
             }
-            wp[0] = TEX_SIZE_X & 0xff;
-            wp[1] = (TEX_SIZE_X >> 8) & 0xff;
-            wp[2] = (TEX_SIZE_X >> 16) & 0xff;
-            wp[3] = (TEX_SIZE_X >> 24) & 0xff;
-            wp[4] = TEX_SIZE_Y & 0xff;
-            wp[5] = (TEX_SIZE_Y >> 8) & 0xff;
-            wp[6] = (TEX_SIZE_Y >> 16) & 0xff;
-            wp[7] = (TEX_SIZE_Y >> 24) & 0xff;
-            wp[8] = CONN_BUF_SIZE & 0xff;
-            wp[9] = (CONN_BUF_SIZE >> 8) & 0xff;
-            wp[10] = (CONN_BUF_SIZE >> 16) & 0xff;
-            wp[11] = (CONN_BUF_SIZE >> 24) & 0xff;
-            wp[12] = CONN_BUF_SIZE & 0xff;
-            wp[13] = (CONN_BUF_SIZE >> 8) & 0xff;
-            wp[14] = (CONN_BUF_SIZE >> 16) & 0xff;
-            wp[15] = (CONN_BUF_SIZE >> 24) & 0xff;
-            // ADVANCE
-            buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
+            encode_info(wp);
         } else if (rp[0] == 'P') {
             if (have_drawn == DRAW_LIMIT) {
                 return connection_send(c);
             }
-            px.x = rp[1] | (rp[2] << 8);
-            px.y = rp[3] | (rp[4] << 8);
-            px.r = rp[5];
-            px.g = rp[6];
-            px.b = rp[7];
-            // ADVANCE
-            buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
+            decode_pixel(&px, rp);
             canvas_set_px(&px);
             have_drawn += 1;
         } else if (rp[0] == 'G') {
@@ -223,44 +246,23 @@ int connection_step(struct connection *c) {
             }
             px.x = rp[1] | (rp[2] << 8);
             px.y = rp[3] | (rp[4] << 8);
-            int inside_canvas = canvas_get_px(&px);
-            wp[0] = px.r;
-            wp[1] = px.g;
-            wp[2] = px.b;
-            wp[3] = inside_canvas;
-            // ADVANCE
-            buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
+            get_and_encode_color(&px, wp);
         } else if (rp[0] == 'p') {
-            struct rect_iter *r = &c->multirecv;
-            if (!rect_iter_done(r)) {
+            if (!rect_iter_done(&c->multirecv)) {
                 printf("BUG: multirecv not empty?\n");
                 return CONNECTION_ERR;
             }
-            r->xstart = rp[1] | (rp[2] << 8);
-            r->x = r->xstart;
-            r->ystart = rp[3] | (rp[4] << 8);
-            r->y = r->ystart;
-            int w = rp[5] | ((rp[7] & 0x0f) << 8);
-            int h = rp[6] | ((rp[7] & 0xf0) << 4);
-            r->xstop = r->xstart + w;
-            r->ystop = r->ystart + h;
-            // ADVANCE
-            buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
+            decode_rect(&c->multirecv, rp);
         } else if (rp[0] == 'g') {
-            struct rect_iter *r = &c->multisend;
-            if (!rect_iter_done(r)) {
+            if (!rect_iter_done(&c->multisend)) {
                 return connection_send(c);
             }
-            r->xstart = rp[1] | (rp[2] << 8);
-            r->x = r->xstart;
-            r->ystart = rp[3] | (rp[4] << 8);
-            r->y = r->ystart;
-            int w = rp[5] | ((rp[7] & 0x0f) << 8);
-            int h = rp[6] | ((rp[7] & 0xf0) << 4);
-            r->xstop = r->xstart + w;
-            r->ystop = r->ystart + h;
-            // ADVANCE
-            buffer_read_reserve(&c->recvbuf, 8); // TODO assert?
+            decode_rect(&c->multisend, rp);
+        }
+        // ADVANCE
+        if (buffer_read_reserve(&c->recvbuf, 8) == NULL) {
+            printf("BUG: reserve after peek\n");
+            return CONNECTION_ERR;
         }
     }
 }

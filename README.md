@@ -2,13 +2,29 @@
 
 ## Protocol
 
-This server implements a binary protocol. Integers are usually sent in little-endian format (details below).
+This server implements a binary protocol. Integers are sent in little-endian format (details below).
+
+### General Remarks
+
+#### Coordinates outside screen bounds
+
+It is allowed to specify coordinates outside screen bounds. In case of reading, pixels outside the screen are interpreted as black (r = g = b = 0). In case of writing, pixels outside the screen are ignored.
+
+#### Zero-size shapes
+
+Rectangles may be defined with `width = 0` or `height = 0`. The resulting command is simply ignored.
+
+#### Undefined bytes
+
+Some commands are smaller than 8 bytes, and the remaining memory is undefined. Nevertheless, all 8 bytes must be sent to the server before the command is processed.
+
+#### Send and receive order
+
+The server may stop processing further commands from a client if its send buffer is full. The send buffer size can be discovered with the INFO command. For example, for a send buffer size of 1024 the server holds a maximum of 1024 / 4 = 256 color values. This means at most 256 GET commands may be sent to the server before the client must read from the server. Of course, this is a conservative guarantee, as more bytes are likely in-flight or stored in the TCP kernel buffer. However, a client not adhering to this is considered erroneous.
 
 
 
 ### Info
-
-Receive general information about the server.
 
 | Byte | Content      |
 | ----:| ------------ |
@@ -22,8 +38,6 @@ Receive general information about the server.
 | 7    | undefined    |
 
 #### Response format
-
-The server sends back the following bytes:
 
 | Byte | Content                     |
 | ----:| --------------------------- |
@@ -44,10 +58,6 @@ The server sends back the following bytes:
 | 14   | `send_buffer_size[16..=23]` |
 | 15   | `send_buffer_size[24..=31]` |
 
-#### Notes
-
- - See the general note about send and receive order.
-
 
 
 ### Print pixel
@@ -62,10 +72,6 @@ The server sends back the following bytes:
 | 5    | `r`          |
 | 6    | `g`          |
 | 7    | `b`          |
-
-#### Notes
-
- - It is allowed to print a pixel outside of screen bounds. In this case, the server ignores the command.
 
 
 
@@ -84,8 +90,6 @@ The server sends back the following bytes:
 
 #### Response format
 
-The server sends back the following bytes:
-
 | Byte | Content                                       |
 | ----:| --------------------------------------------- |
 | 0    | `r`                                           |
@@ -93,17 +97,12 @@ The server sends back the following bytes:
 | 2    | `b`                                           |
 | 3    | if pixel was inside canvas `1`, otherwise `0` |
 
-#### Notes
-
- - Even though the last 3 bytes are not used, they still must be sent. The server will not start processing the request until all 8 bytes have been received.
- - It is allowed to request a pixel outside of screen bounds. In this case, the server returns `r = g = b = 0`. The last byte of the answer may be used to determine if this was the case, or if it was a black pixel inside the screen.
- - See the general note about send and receive order.
-
 
 
 ### Rectangle print
 
-This command first specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.
+This command first specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.  
+The server now expects the client to send `w*h` color values with 4 bytes each. These values are used to fill the rectangle left-to-right and top-to-bottom.
 
 | Byte | Content                                                              |
 | ----:| -------------------------------------------------------------------- |
@@ -116,9 +115,7 @@ This command first specifies a rectangle `(x, y, w, h)`. Due to space constraint
 | 5    | `h[0..=7]`                                                           |
 | 7    | from high to low bits: `h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]` |
 
-#### Pixel format
-
-The server now expects the client to send `w*h` color values with 4 bytes each. These values are used to fill the rectangle left-to-right and top-to-bottom.
+#### Request format
 
 | Byte | Content   |
 | ----:| --------- |
@@ -127,16 +124,12 @@ The server now expects the client to send `w*h` color values with 4 bytes each. 
 | 2    | `b`       | 
 | 3    | undefined |
 
-#### Error handling
-
- - It is allowed to define a rectangle with `w = 0` and `h = 0`. In this case, The server ignores the command.
- - It is allowed to define a rectangle which escapes screen bounds. In this case, the server still expects `w*h` pixels; the ones outside are then ignored.
-
 
 
 ### Rectangle get
 
-This command specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.
+This command specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.  
+The server sends back `w*h` color values with 4 bytes each. The order is left-to-right and top-to-bottom.
 
 | Byte | Content                                                              |
 | ----:| -------------------------------------------------------------------- |
@@ -149,20 +142,11 @@ This command specifies a rectangle `(x, y, w, h)`. Due to space constraints, w a
 | 5    | `h[0..=7]`                                                           |
 | 7    | from high to low bits: `h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]` |
 
-#### Pixel format
+#### Response format
 
-The server sends back `w*h` color values with 4 bytes each. The order is left-to-right and top-to-bottom.
-
-The pixel format is the same as for the GET command.
-
-#### Error handling
-
- - It is allowed to define a rectangle with `w = 0` and `h = 0`. In this case, The server ignores the command.
- - It is allowed to define a rectangle which escapes screen bounds. In this case, the server still sends `w*h` pixels; the ones outside are black (and marked as such in the 4th byte).
- - See the general note about send and receive order.
-
-
-
-## Send and receive order
-
-The server may stop processing further commands from a client if its send buffer is full. The send buffer size can be received with the INFO command. For example, for a send buffer size of 1024 the server holds a maximum of 1024 / 4 = 256 color values. This means at most 256 GET commands may be sent to the server before the client must read from the server. Of course, this is a conservative guarantee, as more bytes are likely in-flight or stored in the TCP kernel buffer. However, a client not adhering to this is considered erroneous.
+| Byte | Content                                       |
+| ----:| --------------------------------------------- |
+| 0    | `r`                                           |
+| 1    | `g`                                           |
+| 2    | `b`                                           |
+| 3    | if pixel was inside canvas `1`, otherwise `0` |

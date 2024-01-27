@@ -258,6 +258,9 @@ int connection_step(struct connection *c) {
                 return connection_send(c);
             }
             decode_rect(&c->multisend, rp);
+        } else {
+            // unknown command.
+            return CONNECTION_ERR;
         }
         // ADVANCE
         if (buffer_read_reserve(&c->recvbuf, 8) == NULL) {

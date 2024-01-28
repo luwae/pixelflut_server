@@ -128,6 +128,33 @@ The server now expects the client to send `w*h` color values with 4 bytes each. 
 
 
 
+### Rectangle fill
+
+This command first specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.  
+The server now expects the client to send a single color value with 4 bytes. The rectangle is filled with this color left-to-right and top-to-bottom.
+
+| Byte | Content                                                              |
+| ----:| -------------------------------------------------------------------- |
+| 0    | `'f' (0x66)`                                                         |
+| 1    | `x[0..=7]`                                                           |
+| 2    | `x[8..=15]`                                                          |
+| 3    | `y[0..=7]`                                                           |
+| 4    | `y[8..=15]`                                                          |
+| 5    | `w[0..=7]`                                                           |
+| 5    | `h[0..=7]`                                                           |
+| 7    | from high to low bits: `h[11] h[10] h[9] h[8] w[11] w[10] w[9] w[8]` |
+
+#### Request format
+
+| Byte | Content   |
+| ----:| --------- |
+| 0    | `r`       |
+| 1    | `g`       |
+| 2    | `b`       | 
+| 3    | undefined |
+
+
+
 ### Rectangle get
 
 This command specifies a rectangle `(x, y, w, h)`. Due to space constraints, w and h have possible ranges `0..=4095`.  

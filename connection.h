@@ -28,10 +28,17 @@ void rect_iter_init(struct rect_iter *r);
 int rect_iter_done(const struct rect_iter *r);
 void rect_iter_advance(struct rect_iter *r);
 
+#define MULTIRECV_SOURCE_INDIVIDUAL 0
+#define MULTIRECV_SOURCE_FILL 1
+#define MULTIRECV_SOURCE_FILL_NOT_READ 2
 struct connection {
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
     struct connection_tracker tracker;
+    int multirecv_source; // TODO init?
+    unsigned char multirecv_source_fill_r;
+    unsigned char multirecv_source_fill_g;
+    unsigned char multirecv_source_fill_b;
     struct rect_iter multirecv;
     struct rect_iter multisend;
     struct buffer recvbuf;

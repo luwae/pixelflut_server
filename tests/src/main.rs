@@ -111,6 +111,18 @@ fn command_rectangle_print(colors: &[(u8, u8, u8)], rect: Rect, stream: &mut Tcp
     Ok(())
 }
 
+fn command_rectangle_fill(color: (u8, u8, u8), rect: Rect, stream: &mut TcpStream) -> std::io::Result<()> {
+    let mut data = [0u8; 12];
+    // first round: write actual command
+    data[0] = b'f';
+    encode_rect(rect, &mut data[0..8]);
+    data[8] = color.0;
+    data[9] = color.1;
+    data[10] = color.2;
+    stream.write_all(&data[..])?;
+    Ok(())
+}
+
 fn command_rectangle_get(colors: &mut [(u8, u8, u8)], rect: Rect, stream: &mut TcpStream) -> std::io::Result<()> {
     assert!(colors.len() == rect.w * rect.h);
     let mut command: [u8; 8] = [0; 8];

@@ -180,6 +180,9 @@ int connection_step(struct connection *c) {
 
         // 2. handle multi recv as far as possible
         while (!rect_iter_done(&c->multirecv) && have_drawn < DRAW_LIMIT) {
+            if (c->multirecv_source == MULTIRECV_SOURCE_FILL) {
+                goto do_multirecv; // no reading necessary
+            }
             rp = buffer_read_reserve(&c->recvbuf, 4);
             if (rp == NULL && have_read < READ_LIMIT) {
                 have_read += 1;
@@ -195,9 +198,22 @@ int connection_step(struct connection *c) {
             if (rp == NULL) {
                 return connection_send(c);
             }
+            if (c->multirecv_source == MULTIRECV_SOURCE_FILL_NOT_READ) {
+                c->multirecv_source = MULTIRECV_SOURCE_FILL;
+                c->multirecv_source_fill_r = rp[0];
+                c->multirecv_source_fill_g = rp[1];
+                c->multirecv_source_fill_b = rp[2];
+            }
+do_multirecv:
             px.x = c->multirecv.x;
             px.y = c->multirecv.y;
-            decode_color(&px, rp);
+            if (c->multirecv_source == MULTIRECV_SOURCE_FILL) {
+                px.r = c->multirecv_source_fill_r;
+                px.g = c->multirecv_source_fill_g;
+                px.b = c->multirecv_source_fill_b;
+            } else { // TODO ASSERT MULTIRECV_SOURCE_INDIVIDUAL
+                decode_color(&px, rp);
+            }
             rect_iter_advance(&c->multirecv);
             canvas_set_px(&px);
             have_drawn += 1;
@@ -252,6 +268,14 @@ int connection_step(struct connection *c) {
                 printf("BUG: multirecv not empty?\n");
                 return CONNECTION_ERR;
             }
+            c->multirecv_source = MULTIRECV_SOURCE_INDIVIDUAL;
+            decode_rect(&c->multirecv, rp);
+        } else if (rp[0] == 'f') {
+            if (!rect_iter_done(&c->multirecv)) {
+                printf("BUG: multirecv not empty?\n");
+                return CONNECTION_ERR;
+            }
+            c->multirecv_source = MULTIRECV_SOURCE_FILL_NOT_READ;
             decode_rect(&c->multirecv, rp);
         } else if (rp[0] == 'g') {
             if (!rect_iter_done(&c->multisend)) {

@@ -1,0 +1,2 @@
+two data types: u8 "byte" and i32 "int"
+for arithmetic operations: arguments are cast to int (similar to C)

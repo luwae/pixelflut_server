@@ -7,6 +7,8 @@
 enum opcode {
     OP_ADD,
     OP_GET_WRAP_R,
+    OP_GET_WRAP_G,
+    OP_GET_WRAP_B,
 };
 
 enum param_type {
@@ -80,6 +82,7 @@ int insn_execute(struct execution_state *s) {
     int left;
     int right;
     struct pixel px;
+    unsigned char *colorp;
     switch (ci->op) {
         case OP_ADD:
             left = param_get_value(s, &ci->params[1]);
@@ -87,16 +90,24 @@ int insn_execute(struct execution_state *s) {
             mem_map_set(s, ci->params[0].value, left + right);
             break;
         case OP_GET_WRAP_R:
+            colorp = &px.r;
+            goto selection_done;
+        case OP_GET_WRAP_G:
+            colorp = &px.g;
+            goto selection_done;
+        case OP_GET_WRAP_B:
+            colorp = &px.b;
+selection_done:
             left = param_get_value(s, &ci->params[1]);
             right = param_get_value(s, &ci->params[2]);
-            while (left < 0) { left += TEX_SIZE_X; }
+            while (left < 0) { left += TEX_SIZE_X; } // TODO mod
             while (left >= TEX_SIZE_X) { left -= TEX_SIZE_X; }
             px.x = left;
-            while (right < 0) { left += TEX_SIZE_Y; }
+            while (right < 0) { right += TEX_SIZE_Y; }
             while (right >= TEX_SIZE_Y) { right -= TEX_SIZE_Y; }
             px.y = right;
             canvas_get_px(&px);
-            mem_map_set(s, ci->params[0].value, px.r);
+            mem_map_set(s, ci->params[0].value, *colorp);
             break;
     }
     return 1;

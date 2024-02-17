@@ -1,3 +1,5 @@
 /target
 server
 *.o
+/build
+.vscode

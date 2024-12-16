@@ -112,23 +112,18 @@ static void decode_color(struct pixel *px, const unsigned char *rp) {
     px->b = rp[2];
 }
 
+#define ENCODE_LE32(value, ptr) do { \
+    (ptr)[0] = (value) & 0xff; \
+    (ptr)[1] = ((value) >> 8) & 0xff; \
+    (ptr)[2] = ((value) >> 16) & 0xff; \
+    (ptr)[3] = ((value) >> 24) & 0xff; \
+} while (0)
+
 static void encode_info(unsigned char *wp) {
-    wp[0] = TEX_SIZE_X & 0xff;
-    wp[1] = (TEX_SIZE_X >> 8) & 0xff;
-    wp[2] = (TEX_SIZE_X >> 16) & 0xff;
-    wp[3] = (TEX_SIZE_X >> 24) & 0xff;
-    wp[4] = TEX_SIZE_Y & 0xff;
-    wp[5] = (TEX_SIZE_Y >> 8) & 0xff;
-    wp[6] = (TEX_SIZE_Y >> 16) & 0xff;
-    wp[7] = (TEX_SIZE_Y >> 24) & 0xff;
-    wp[8] = CONN_BUF_SIZE & 0xff;
-    wp[9] = (CONN_BUF_SIZE >> 8) & 0xff;
-    wp[10] = (CONN_BUF_SIZE >> 16) & 0xff;
-    wp[11] = (CONN_BUF_SIZE >> 24) & 0xff;
-    wp[12] = CONN_BUF_SIZE & 0xff;
-    wp[13] = (CONN_BUF_SIZE >> 8) & 0xff;
-    wp[14] = (CONN_BUF_SIZE >> 16) & 0xff;
-    wp[15] = (CONN_BUF_SIZE >> 24) & 0xff;
+    ENCODE_LE32(TEX_SIZE_X, wp);
+    ENCODE_LE32(TEX_SIZE_Y, wp + 4);
+    ENCODE_LE32(CONN_BUF_SIZE, wp + 8);
+    ENCODE_LE32(CONN_BUF_SIZE, wp + 12);
 }
 
 static void get_and_encode_color(struct pixel *px, unsigned char *wp) {

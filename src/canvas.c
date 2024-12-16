@@ -13,7 +13,6 @@ SDL_Window *window;
 SDL_Renderer *renderer;
 SDL_Texture *screen_texture;
 unsigned int pixels[TEX_SIZE_X*TEX_SIZE_Y*4]; // TODO race condition when setting pixels?
-pthread_t canvas_thread;
 
 #define CLEANUP_AND_EXIT_IF(error_cond, prefix) do { \
     if (error_cond) {                                \

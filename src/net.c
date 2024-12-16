@@ -24,7 +24,7 @@
 struct connection conns[MAX_CONNS];
 size_t num_conns = 0;
 pthread_t net_thread;
-volatile int should_quit = 0;
+volatile int should_quit = 0; // written from other thread
 
 static void handle_new_connection(int sockfd) {
     if (num_conns == MAX_CONNS) {

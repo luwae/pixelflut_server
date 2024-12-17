@@ -1,5 +1,9 @@
 # pixelflut server
 
+## Building (SDL2 canvas)
+- install SDL2 development files (fedora: `sudo dnf install SDL2-devel`)
+- run `make`. Use the makefile to change build directory (default is `./build`)
+
 ## Protocol
 
 This server implements a binary protocol. Integers are sent in little-endian format (details below).

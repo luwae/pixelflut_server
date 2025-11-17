@@ -7,7 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
-#include "SDL.h" // only used for timing here
+#include <SDL3/SDL.h>
 
 #include "param.h"
 #include "common.h"
@@ -70,7 +70,7 @@ void connection_init(struct connection *c, int connfd, struct sockaddr_in connad
     set_nonblocking(connfd);
     c->fd = connfd;
     c->addr = connaddr;
-    connection_tracker_init(&c->tracker, connaddr.sin_addr.s_addr, SDL_GetTicks64());
+    connection_tracker_init(&c->tracker, connaddr.sin_addr.s_addr, SDL_GetTicks());
     rect_iter_init(&c->multirecv);
     rect_iter_init(&c->multisend);
     buffer_init_malloc(&c->recvbuf);
@@ -80,7 +80,7 @@ void connection_init(struct connection *c, int connfd, struct sockaddr_in connad
 void connection_close(struct connection *c) {
     buffer_destroy_malloc(&c->recvbuf);
     buffer_destroy_malloc(&c->sendbuf);
-    c->tracker.end_time = SDL_GetTicks64(); // TODO use OS functionality
+    c->tracker.end_time = SDL_GetTicks(); // TODO use OS functionality
     connection_tracker_print(&c->tracker);
 
     close(c->fd);

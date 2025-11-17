@@ -1,9 +1,11 @@
 // https://benedicthenshaw.com/soft_render_sdl2.html
 
+#include <SDL3/SDL_oldnames.h>
+#include <SDL3/SDL_render.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include "SDL.h"
+#include <SDL3/SDL.h>
 
 #include "param.h"
 #include "common.h"
@@ -41,21 +43,16 @@ void canvas_stop(void) {
 void canvas_draw(void) {
     // ? SDL_RenderClear(renderer);
     SDL_UpdateTexture(screen_texture, NULL, pixels, TEX_SIZE_X*4);
-    SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
+    SDL_RenderTexture(renderer, screen_texture, NULL, NULL);
     SDL_RenderPresent(renderer);
 }
 
 void canvas_start(void) {
     int status = SDL_Init(SDL_INIT_VIDEO);
-    CLEANUP_AND_EXIT_IF(status != 0, "SDL_Init");
+    CLEANUP_AND_EXIT_IF(status == 0, "SDL_Init");
 
-    window = SDL_CreateWindow("pixelflut",
-            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-            SCREEN_SIZE_X, SCREEN_SIZE_Y, 0);
-    CLEANUP_AND_EXIT_IF(window == NULL, "SDL_CreateWindow");
-
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
-    CLEANUP_AND_EXIT_IF(renderer == NULL, "SDL_CreateRenderer");
+    status = SDL_CreateWindowAndRenderer("pixelflut", SCREEN_SIZE_X, SCREEN_SIZE_Y, 0,  &window, &renderer);
+    CLEANUP_AND_EXIT_IF(status == 0, "SDL_CreateWindowAndRenderer");
     
     screen_texture = SDL_CreateTexture(renderer,
             SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
@@ -89,7 +86,7 @@ int canvas_should_quit(void) {
     SDL_Event e;
 
     while (SDL_PollEvent(&e) != 0) {
-        if (e.type == SDL_QUIT)
+        if (e.type == SDL_EVENT_QUIT)
             return 1;
     }
     return 0;

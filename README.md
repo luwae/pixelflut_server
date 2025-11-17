@@ -1,7 +1,7 @@
 # pixelflut server
 
-## Building (SDL2 canvas)
-- install SDL2 development files (fedora: `sudo dnf install SDL2-devel`)
+## Building (SDL3 canvas)
+- install SDL3 development files (fedora: `sudo dnf install SDL3-devel`)
 - run `make`. Use the makefile to change build directory (default is `./build`)
 
 ## Protocol

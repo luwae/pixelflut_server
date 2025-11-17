@@ -7,7 +7,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
-#include "SDL.h"
 
 #include "common.h"
 #include "canvas.h"

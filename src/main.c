@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "SDL.h"
+#include <SDL3/SDL.h>
 
 #include "common.h"
 #include "canvas.h"
@@ -21,9 +21,9 @@ int main() {
     net_start();
 
     while (!canvas_should_quit()) {
-        unsigned long long before_drawing = SDL_GetTicks64();
+        unsigned long long before_drawing = SDL_GetTicks();
         canvas_draw();
-        unsigned long long drawing_time = SDL_GetTicks64() - before_drawing;
+        unsigned long long drawing_time = SDL_GetTicks() - before_drawing;
         if (drawing_time > MS_PER_FRAME)
             drawing_time = MS_PER_FRAME;
         SDL_Delay(MS_PER_FRAME - drawing_time);

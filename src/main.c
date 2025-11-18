@@ -1,15 +1,10 @@
-#include <stdio.h> 
 #include <netinet/in.h> 
-#include <stdlib.h> 
-#include <string.h> 
 #include <sys/socket.h> 
 #include <sys/types.h> 
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <SDL3/SDL.h>
 
-#include "common.h"
 #include "canvas.h"
 #include "net.h"
 
@@ -20,13 +15,15 @@ int main() {
     canvas_start();
     net_start();
 
+    unsigned long long start = SDL_GetTicks();
+    unsigned long long framecounter = 0;
     while (!canvas_should_quit()) {
-        unsigned long long before_drawing = SDL_GetTicks();
         canvas_draw();
-        unsigned long long drawing_time = SDL_GetTicks() - before_drawing;
-        if (drawing_time > MS_PER_FRAME)
-            drawing_time = MS_PER_FRAME;
-        SDL_Delay(MS_PER_FRAME - drawing_time);
+        unsigned long long now = SDL_GetTicks();
+        unsigned long long next_frame_time = start + (++framecounter * MS_PER_FRAME);
+        if (now < next_frame_time) {
+            SDL_Delay(next_frame_time - now);
+        }
     }
 
     net_stop();

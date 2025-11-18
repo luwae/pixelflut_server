@@ -1,5 +1,8 @@
+// a single connection.
 #ifndef PFS_CONNECTION_H
 #define PFS_CONNECTION_H
+
+#include <stdbool.h>
 
 #include <sys/socket.h>
 #include "buffer.h"
@@ -15,43 +18,25 @@ struct connection_tracker {
 void connection_tracker_init(struct connection_tracker *t, in_addr_t addr, unsigned long long start_time);
 void connection_tracker_print(const struct connection_tracker *t);
 
-struct rect_iter {
-    int xstart;
-    int ystart;
-    int xstop;
-    int ystop;
-    int x;
-    int y;
-};
-
-void rect_iter_init(struct rect_iter *r);
-int rect_iter_done(const struct rect_iter *r);
-void rect_iter_advance(struct rect_iter *r);
-
-#define MULTIRECV_SOURCE_INDIVIDUAL 0
-#define MULTIRECV_SOURCE_FILL 1
-#define MULTIRECV_SOURCE_FILL_NOT_READ 2
 struct connection {
     int fd; // fd == -1 means free
     struct sockaddr_in addr;
     struct connection_tracker tracker;
-    int multirecv_source; // TODO init?
-    unsigned char multirecv_source_fill_r;
-    unsigned char multirecv_source_fill_g;
-    unsigned char multirecv_source_fill_b;
-    struct rect_iter multirecv;
-    struct rect_iter multisend;
     struct buffer recvbuf;
     struct buffer sendbuf;
+    bool had_error;
 };
 
-void connection_print(const struct connection *c);
 void connection_init(struct connection *c, int connfd, struct sockaddr_in connaddr);
+void connection_print(const struct connection *c);
 void connection_close(struct connection *c);
 
-#define CONNECTION_OK 0
-#define CONNECTION_ERR 1
-#define CONNECTION_END 2
-int connection_step(struct connection *c);
+enum connection_step_result {
+    CONNECTION_OK = 0,
+    CONNECTION_ERR,
+    CONNECTION_END,
+    CONNECTION_UNKNOWN_COMMAND,
+};
+enum connection_step_result connection_step(struct connection *c);
 
 #endif

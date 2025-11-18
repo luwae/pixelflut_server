@@ -3,15 +3,15 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "param.h"
+#include "common.h"
 #include "buffer.h"
 
-void buffer_init_malloc(struct buffer *b) {
+void buffer_init_malloc(struct buffer *b, size_t capacity) {
     b->read_pos = b->write_pos = 0;
-    b->data = malloc(CONN_BUF_SIZE);
+    b->capacity = capacity;
+    b->data = malloc(capacity);
     if (b->data == NULL) {
-        perror("malloc");
-        exit(1); // TODO
+        PANIC("malloc");
     }
 }
 
@@ -25,7 +25,7 @@ size_t buffer_size(const struct buffer *b) {
 }
 
 size_t buffer_write_space(const struct buffer *b) {
-    return CONN_BUF_SIZE - b->write_pos;
+    return b->capacity - b->write_pos;
 }
 
 void buffer_move_front(struct buffer *b) {
@@ -39,9 +39,8 @@ void buffer_move_front(struct buffer *b) {
 
 int buffer_read_syscall(struct buffer *b, int fd) {
     size_t size = buffer_size(b);
-    if (size == CONN_BUF_SIZE) {
-        printf("don't call read when buffer full");
-        exit(1); // TODO
+    if (size == b->capacity) {
+        PANIC("full buffer");
     }
     buffer_move_front(b);
     int status = read(fd, &b->data[b->write_pos], buffer_write_space(b));
@@ -54,8 +53,7 @@ int buffer_read_syscall(struct buffer *b, int fd) {
 int buffer_write_syscall(struct buffer *b, int fd) {
     size_t size = buffer_size(b);
     if (size == 0) {
-        printf("don't call write when buffer empty");
-        exit(1); // TODO
+        PANIC("empty buffer");
     }
     int status = write(fd, &b->data[b->read_pos], size);
     if (status > 0) {

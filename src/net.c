@@ -1,6 +1,5 @@
 #include <string.h>
 #include <stdio.h>
-#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -9,7 +8,6 @@
 #include <fcntl.h>
 
 #include "common.h"
-#include "canvas.h"
 #include "connection.h"
 #include "net.h"
 
@@ -70,8 +68,7 @@ static void *net_thread_main(void *arg) {
         for (size_t i = 0; i < num_conns; i++) {
             struct connection *c = &conns[i];
             if (c->fd == -1) {
-                printf("connection not used?\n");
-                exit(1); // TODO
+                PANIC("connection not used?");
             }
 
             int status = connection_step(c);
@@ -86,8 +83,7 @@ static void *net_thread_main(void *arg) {
                 i -= 1; // connection at this index is now another one
                 continue;
             } else {
-                printf("what.\n");
-                exit(1); // TODO
+                PANIC("unreachable");
             }
         }
     }
@@ -97,8 +93,7 @@ static void *net_thread_main(void *arg) {
         if (conns[i].fd != -1) {
             connection_close(&conns[i]);
         } else {
-            printf("connection not used?\n");
-            exit(1); // TODO
+            PANIC("connection not used?");
         }
     }
     close(sockfd);
@@ -147,4 +142,8 @@ void net_start(void) {
 void net_stop(void) {
     should_quit = 1;
     pthread_join(net_thread, NULL);
+}
+
+void net_info(void) {
+    printf("net info\n");
 }

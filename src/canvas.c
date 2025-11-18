@@ -1,7 +1,5 @@
 // https://benedicthenshaw.com/soft_render_sdl2.html
 
-#include <SDL3/SDL_oldnames.h>
-#include <SDL3/SDL_render.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>

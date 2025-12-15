@@ -2,6 +2,8 @@
 #define PFS_COMMON_H
 
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 struct pixel {
     unsigned int x;

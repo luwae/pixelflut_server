@@ -1,5 +1,5 @@
 CC:=gcc
-CFLAGS:=-g -Wall -Wextra -c
+override CFLAGS += -g -Wall -Wextra -c -Iinclude
 
 SRC_DIR := src
 BUILD_DIR := build

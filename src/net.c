@@ -11,8 +11,6 @@
 #include "connection.h"
 #include "net.h"
 
-#define PORT 1337
-
 // conns[0..num_conns] contains the active connections.
 // if one connection in the middle is removed, conns[num_conns - 1] is moved in its spot.
 // this is like rust's Vec::swap_remove.
@@ -82,6 +80,8 @@ static void *net_thread_main(void *arg) {
                 close_and_swap(c, "close");
                 i -= 1; // connection at this index is now another one
                 continue;
+            } else if (status == CONNECTION_UNKNOWN_COMMAND) {
+
             } else {
                 PANIC("unreachable");
             }
@@ -100,7 +100,7 @@ static void *net_thread_main(void *arg) {
     return NULL;
 }
 
-void net_start(void) {
+void net_start(uint16_t port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("socket");
@@ -119,7 +119,7 @@ void net_start(void) {
     struct sockaddr_in servaddr = {0};
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(PORT);
+    servaddr.sin_port = htons(port);
 
     if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) != 0) {
         perror("bind");
